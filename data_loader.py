@@ -38,7 +38,22 @@ class MegaSenaDataLoader:
 
     def load_from_csv(self, filepath: str) -> pd.DataFrame:
         """Carrega dados de um arquivo CSV."""
-        df = pd.read_csv(filepath, sep=';', encoding='utf-8')
+        # Tenta detectar o separador automaticamente
+        try:
+            # Tenta com ponto-e-vírgula primeiro
+            df = pd.read_csv(filepath, sep=';', encoding='utf-8', on_bad_lines='skip')
+        except Exception:
+            try:
+                # Tenta com vírgula
+                df = pd.read_csv(filepath, sep=',', encoding='utf-8', on_bad_lines='skip')
+            except Exception:
+                try:
+                    # Tenta com tabulação
+                    df = pd.read_csv(filepath, sep='\t', encoding='utf-8', on_bad_lines='skip')
+                except Exception:
+                    # Última tentativa: deixa o pandas detectar automaticamente
+                    df = pd.read_csv(filepath, sep=None, engine='python', encoding='utf-8', on_bad_lines='skip')
+
         return self._normalize_dataframe(df)
 
     def load_from_excel(self, filepath: str) -> pd.DataFrame:
@@ -141,21 +156,58 @@ class MegaSenaDataLoader:
         col_mapping = {
             'concurso': 'Concurso',
             'numero_concurso': 'Concurso',
+            'numero': 'Concurso',
+            'nº': 'Concurso',
+            'num': 'Concurso',
             'data': 'Data',
             'data_sorteio': 'Data',
+            'data do sorteio': 'Data',
             'bola1': 'D1', 'bola2': 'D2', 'bola3': 'D3',
             'bola4': 'D4', 'bola5': 'D5', 'bola6': 'D6',
+            'bola 1': 'D1', 'bola 2': 'D2', 'bola 3': 'D3',
+            'bola 4': 'D4', 'bola 5': 'D5', 'bola 6': 'D6',
             'dezena1': 'D1', 'dezena2': 'D2', 'dezena3': 'D3',
             'dezena4': 'D4', 'dezena5': 'D5', 'dezena6': 'D6',
+            'dezena 1': 'D1', 'dezena 2': 'D2', 'dezena 3': 'D3',
+            'dezena 4': 'D4', 'dezena 5': 'D5', 'dezena 6': 'D6',
+            '1ª dezena': 'D1', '2ª dezena': 'D2', '3ª dezena': 'D3',
+            '4ª dezena': 'D4', '5ª dezena': 'D5', '6ª dezena': 'D6',
         }
 
         # Renomeia colunas
         df.columns = [col_mapping.get(c.lower().strip(), c) for c in df.columns]
 
+        # Se não encontrou as colunas padrão, tenta detectar automaticamente
+        if 'Concurso' not in df.columns:
+            # Primeira coluna numérica vira Concurso
+            for col in df.columns:
+                if df[col].dtype in ['int64', 'float64']:
+                    df.rename(columns={col: 'Concurso'}, inplace=True)
+                    break
+
+        # Procura colunas de dezenas (colunas com números de 1-60)
+        dezena_cols = []
+        for col in df.columns:
+            if col not in ['Concurso', 'Data']:
+                try:
+                    # Verifica se a coluna tem números na faixa 1-60
+                    valores = pd.to_numeric(df[col], errors='coerce')
+                    if valores.min() >= 1 and valores.max() <= 60:
+                        dezena_cols.append(col)
+                except:
+                    continue
+
+        # Renomeia as primeiras 6 colunas de dezenas
+        for i, col in enumerate(dezena_cols[:6]):
+            df.rename(columns={col: f'D{i+1}'}, inplace=True)
+
         # Garante que dezenas são inteiros
         for col in self.colunas_dezenas:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').astype(int)
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+
+        # Remove linhas com valores inválidos
+        df = df[df['D1'] > 0].copy()
 
         self.df = df
         return df

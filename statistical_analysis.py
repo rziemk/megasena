@@ -479,6 +479,295 @@ class MegaSenaAnalyzer:
         return scores_df.tail(n)['numero'].tolist()
 
     # =========================================================================
+    # NOVAS ANÁLISES PROFUNDAS
+    # =========================================================================
+
+    def analisar_baixo_medio_alto(self) -> Dict[str, float]:
+        """
+        Analisa distribuição em 3 faixas: Baixo (1-20), Médio (21-40), Alto (41-60).
+
+        Returns:
+            Dicionário com percentual de cada padrão (ex: '2B-2M-2A')
+        """
+        padroes = Counter()
+
+        for _, row in self.df.iterrows():
+            dezenas = row[self.colunas_dezenas].values
+
+            baixos = sum(1 for d in dezenas if 1 <= d <= 20)
+            medios = sum(1 for d in dezenas if 21 <= d <= 40)
+            altos = sum(1 for d in dezenas if 41 <= d <= 60)
+
+            padrao = f"{baixos}B-{medios}M-{altos}A"
+            padroes[padrao] += 1
+
+        total = sum(padroes.values())
+        return {p: (count / total) * 100 for p, count in padroes.most_common()}
+
+    def analisar_linhas_volante(self) -> Dict[str, any]:
+        """
+        Analisa distribuição por linhas do volante (6 linhas de 10 números).
+
+        Linhas:
+        - L1: 01-10
+        - L2: 11-20
+        - L3: 21-30
+        - L4: 31-40
+        - L5: 41-50
+        - L6: 51-60
+
+        Returns:
+            Estatísticas detalhadas por linha
+        """
+        linhas = {
+            'L1': (1, 10),
+            'L2': (11, 20),
+            'L3': (21, 30),
+            'L4': (31, 40),
+            'L5': (41, 50),
+            'L6': (51, 60),
+        }
+
+        # Contadores por linha
+        aparicoes_por_linha = {l: [] for l in linhas.keys()}
+        padroes_distribuicao = Counter()
+
+        for _, row in self.df.iterrows():
+            dezenas = row[self.colunas_dezenas].values
+            distribuicao = {}
+
+            for linha, (inicio, fim) in linhas.items():
+                count = sum(1 for d in dezenas if inicio <= d <= fim)
+                aparicoes_por_linha[linha].append(count)
+                distribuicao[linha] = count
+
+            # Cria padrão de distribuição (ex: "L1:1-L2:2-L3:1-L4:1-L5:1-L6:0")
+            padrao = "-".join([f"{l}:{distribuicao[l]}" for l in sorted(linhas.keys())])
+            padroes_distribuicao[padrao] += 1
+
+        # Estatísticas
+        resultado = {
+            'medias_por_linha': {
+                linha: np.mean(vals) for linha, vals in aparicoes_por_linha.items()
+            },
+            'desvio_por_linha': {
+                linha: np.std(vals) for linha, vals in aparicoes_por_linha.items()
+            },
+            'max_por_linha': {
+                linha: max(vals) for linha, vals in aparicoes_por_linha.items()
+            },
+            'top_padroes': padroes_distribuicao.most_common(10),
+            'total_padroes': len(padroes_distribuicao),
+        }
+
+        return resultado
+
+    def analisar_colunas_volante(self) -> Dict[str, any]:
+        """
+        Analisa distribuição por colunas do volante (10 colunas de 6 números).
+
+        Colunas:
+        - C1: 01,11,21,31,41,51
+        - C2: 02,12,22,32,42,52
+        - ...
+        - C10: 10,20,30,40,50,60
+
+        Returns:
+            Estatísticas detalhadas por coluna
+        """
+        # Monta as colunas
+        colunas = {}
+        for c in range(1, 11):
+            colunas[f'C{c}'] = [c, c+10, c+20, c+30, c+40, c+50]
+
+        # Contadores por coluna
+        aparicoes_por_coluna = {c: [] for c in colunas.keys()}
+        padroes_distribuicao = Counter()
+
+        for _, row in self.df.iterrows():
+            dezenas = set(row[self.colunas_dezenas].values)
+            distribuicao = {}
+
+            for coluna, nums in colunas.items():
+                count = sum(1 for n in nums if n in dezenas)
+                aparicoes_por_coluna[coluna].append(count)
+                distribuicao[coluna] = count
+
+            # Padrão de distribuição
+            # Simplificado: quantas colunas com 0, 1, 2+ números
+            zeros = sum(1 for c in distribuicao.values() if c == 0)
+            uns = sum(1 for c in distribuicao.values() if c == 1)
+            dois_ou_mais = sum(1 for c in distribuicao.values() if c >= 2)
+
+            padrao = f"{zeros}C0-{uns}C1-{dois_ou_mais}C2+"
+            padroes_distribuicao[padrao] += 1
+
+        resultado = {
+            'medias_por_coluna': {
+                col: np.mean(vals) for col, vals in aparicoes_por_coluna.items()
+            },
+            'desvio_por_coluna': {
+                col: np.std(vals) for col, vals in aparicoes_por_coluna.items()
+            },
+            'max_por_coluna': {
+                col: max(vals) for col, vals in aparicoes_por_coluna.items()
+            },
+            'top_padroes': padroes_distribuicao.most_common(10),
+            'total_padroes': len(padroes_distribuicao),
+        }
+
+        return resultado
+
+    def analisar_ciclos_renovacao_completa(self) -> Dict[str, any]:
+        """
+        Analisa a cada quantos concursos TODOS os 60 números aparecem pelo menos 1 vez.
+        Também analisa quantas vezes cada número aparece dentro desses ciclos.
+
+        Returns:
+            Estatísticas de ciclos de renovação completa
+        """
+        todos_concursos = []
+        numeros_vistos = set()
+        inicio_ciclo = 0
+        ciclos = []
+        aparicoes_por_ciclo = []
+
+        for idx, row in self.df.iterrows():
+            dezenas = row[self.colunas_dezenas].values
+            numeros_vistos.update(dezenas)
+
+            # Se viu todos os 60 números
+            if len(numeros_vistos) == 60:
+                tamanho_ciclo = idx - inicio_ciclo + 1
+                ciclos.append(tamanho_ciclo)
+
+                # Conta aparições de cada número neste ciclo
+                ciclo_df = self.df.iloc[inicio_ciclo:idx+1]
+                freq_ciclo = Counter()
+                for _, r in ciclo_df.iterrows():
+                    freq_ciclo.update(r[self.colunas_dezenas].values)
+
+                aparicoes_por_ciclo.append(dict(freq_ciclo))
+
+                # Reinicia
+                numeros_vistos = set()
+                inicio_ciclo = idx + 1
+
+        if not ciclos:
+            return {
+                'ciclo_medio': 0,
+                'ciclo_minimo': 0,
+                'ciclo_maximo': 0,
+                'total_ciclos_completos': 0,
+                'media_aparicoes_por_numero_no_ciclo': {},
+            }
+
+        # Calcula médias de aparições por número
+        media_aparicoes = {}
+        for num in range(1, 61):
+            aparicoes = [ciclo.get(num, 0) for ciclo in aparicoes_por_ciclo]
+            media_aparicoes[num] = np.mean(aparicoes) if aparicoes else 0
+
+        return {
+            'ciclo_medio': np.mean(ciclos),
+            'ciclo_minimo': min(ciclos),
+            'ciclo_maximo': max(ciclos),
+            'ciclo_desvio': np.std(ciclos),
+            'total_ciclos_completos': len(ciclos),
+            'ultimos_5_ciclos': ciclos[-5:] if len(ciclos) >= 5 else ciclos,
+            'media_aparicoes_por_numero_no_ciclo': media_aparicoes,
+            'numeros_mais_frequentes_no_ciclo': sorted(
+                media_aparicoes.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:10],
+        }
+
+    def criar_perfis_de_jogos(self) -> pd.DataFrame:
+        """
+        Cria perfis completos de cada jogo com todos os padrões combinados.
+
+        Returns:
+            DataFrame com perfil completo de cada concurso
+        """
+        perfis = []
+
+        for idx, row in self.df.iterrows():
+            dezenas = sorted(row[self.colunas_dezenas].values)
+
+            # Padrões básicos
+            pares = sum(1 for d in dezenas if d % 2 == 0)
+            impares = 6 - pares
+
+            baixos_1_20 = sum(1 for d in dezenas if 1 <= d <= 20)
+            medios_21_40 = sum(1 for d in dezenas if 21 <= d <= 40)
+            altos_41_60 = sum(1 for d in dezenas if 41 <= d <= 60)
+
+            baixos_1_30 = sum(1 for d in dezenas if 1 <= d <= 30)
+            altos_31_60 = 6 - baixos_1_30
+
+            # Distribuição por linha
+            linhas = [
+                sum(1 for d in dezenas if 1 <= d <= 10),
+                sum(1 for d in dezenas if 11 <= d <= 20),
+                sum(1 for d in dezenas if 21 <= d <= 30),
+                sum(1 for d in dezenas if 31 <= d <= 40),
+                sum(1 for d in dezenas if 41 <= d <= 50),
+                sum(1 for d in dezenas if 51 <= d <= 60),
+            ]
+
+            # Distribuição por coluna
+            colunas_map = {}
+            for c in range(1, 11):
+                nums_coluna = [c, c+10, c+20, c+30, c+40, c+50]
+                colunas_map[c] = sum(1 for n in nums_coluna if n in dezenas)
+
+            # Sequências e gaps
+            gaps = [dezenas[i+1] - dezenas[i] for i in range(5)]
+            gap_medio = np.mean(gaps)
+            gap_max = max(gaps)
+            gap_min = min(gaps)
+
+            sequencias = sum(1 for g in gaps if g == 1)
+
+            # Quadrantes
+            q1 = sum(1 for d in dezenas if d in [*range(1,6), *range(11,16), *range(21,26)])
+            q2 = sum(1 for d in dezenas if d in [*range(6,11), *range(16,21), *range(26,31)])
+            q3 = sum(1 for d in dezenas if d in [*range(31,36), *range(41,46), *range(51,56)])
+            q4 = sum(1 for d in dezenas if d in [*range(36,41), *range(46,51), *range(56,61)])
+
+            perfis.append({
+                'Concurso': row.get('Concurso', idx),
+                'Dezenas': ','.join(map(str, dezenas)),
+                'Soma': sum(dezenas),
+                'Pares': pares,
+                'Impares': impares,
+                'Baixos_1_20': baixos_1_20,
+                'Medios_21_40': medios_21_40,
+                'Altos_41_60': altos_41_60,
+                'Baixos_1_30': baixos_1_30,
+                'Altos_31_60': altos_31_60,
+                'L1': linhas[0],
+                'L2': linhas[1],
+                'L3': linhas[2],
+                'L4': linhas[3],
+                'L5': linhas[4],
+                'L6': linhas[5],
+                'Linhas_Com_Numeros': sum(1 for l in linhas if l > 0),
+                'Colunas_Com_2+': sum(1 for c in colunas_map.values() if c >= 2),
+                'Gap_Medio': round(gap_medio, 2),
+                'Gap_Maximo': gap_max,
+                'Gap_Minimo': gap_min,
+                'Sequencias': sequencias,
+                'Q1': q1,
+                'Q2': q2,
+                'Q3': q3,
+                'Q4': q4,
+            })
+
+        return pd.DataFrame(perfis)
+
+    # =========================================================================
     # VALIDAÇÃO DE EQUILÍBRIO DO JOGO
     # =========================================================================
 
@@ -584,3 +873,5 @@ if __name__ == "__main__":
     print("=" * 60)
     scores = analyzer.calcular_todos_scores()
     print(scores.head(20).to_string(index=False))
+
+
