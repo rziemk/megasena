@@ -17,7 +17,6 @@ from collections import Counter
 from config import BUDGET_TOTAL, TABELA_CUSTOS_OFICIAL, PROBABILIDADES
 from data_loader import MegaSenaDataLoader, load_data
 from statistical_analysis import MegaSenaAnalyzer
-from strategies import EstrategiaA, EstrategiaB, ComparadorEstrategias
 
 # ============================================================================
 # TABELA OFICIAL DA CAIXA
@@ -107,25 +106,35 @@ st.markdown("""
 # FUNÇÕES AUXILIARES
 # ============================================================================
 
-@st.cache_data
-def carregar_dados(source='synthetic', file=None):
-    """Carrega dados com cache."""
+def carregar_dados_arquivo(file):
+    """Carrega dados de arquivo CSV ou Excel."""
+    import tempfile
+    import os
+
     try:
-        if source == 'synthetic':
-            return load_data('synthetic')
-        elif source == 'excel' and file is not None:
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-                tmp.write(file.getvalue())
-                tmp_path = tmp.name
-            return load_data('excel', tmp_path)
-        elif source == 'csv' and file is not None:
-            import tempfile
+        # Detectar tipo de arquivo pela extensão
+        file_name = file.name.lower()
+
+        if file_name.endswith('.csv'):
             with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
                 tmp.write(file.getvalue())
                 tmp_path = tmp.name
-            return load_data('csv', tmp_path)
-        return load_data('synthetic')
+            df = load_data('csv', tmp_path)
+            os.unlink(tmp_path)  # Limpar arquivo temporário
+            return df
+
+        elif file_name.endswith(('.xlsx', '.xls')):
+            suffix = '.xlsx' if file_name.endswith('.xlsx') else '.xls'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(file.getvalue())
+                tmp_path = tmp.name
+            df = load_data('excel', tmp_path)
+            os.unlink(tmp_path)  # Limpar arquivo temporário
+            return df
+        else:
+            st.error("Formato não suportado. Use arquivos .csv, .xlsx ou .xls")
+            return None
+
     except Exception as e:
         st.error(f"""
         ❌ **Erro ao carregar arquivo:**
@@ -137,9 +146,14 @@ def carregar_dados(source='synthetic', file=None):
         - Ou: Número, Data, Bola1, Bola2, Bola3, Bola4, Bola5, Bola6
         - Valores das dezenas entre 1 e 60
 
-        **Dica:** Use dados sintéticos para testar primeiro!
+        **Dica:** Use dados de demonstração para testar primeiro!
         """)
-        return load_data('synthetic')
+        return None
+
+@st.cache_data
+def carregar_dados_sinteticos():
+    """Carrega dados sintéticos/demonstração com cache."""
+    return load_data('synthetic')
 
 def explicar_metrica(metrica):
     """Retorna explicação detalhada de cada métrica."""
@@ -194,21 +208,24 @@ def explicar_metrica(metrica):
         """,
 
         "alto_baixo": """
-        ### 📊 Como calculamos Alto/Baixo
+        ### 📊 Como calculamos Baixo/Médio/Alto
 
-        **Divisão:**
-        - **Baixos:** 1 a 30
-        - **Altos:** 31 a 60
+        **Divisão em 3 Faixas:**
+        - **Baixos:** 1 a 20 (primeira faixa)
+        - **Médios:** 21 a 40 (faixa intermediária)
+        - **Altos:** 41 a 60 (última faixa)
 
         **Análise:**
         - Contamos quantos números de cada faixa aparecem em cada sorteio
-        - Padrão mais comum: **3 Baixos + 3 Altos** (~35% dos casos)
+        - Padrão mais comum: **2 de cada faixa** (equilíbrio perfeito: 2B-2M-2A)
+        - Também são comuns padrões próximos como 2B-3M-1A, 1B-2M-3A, etc.
 
         **Por que isso importa?**
-        - Extremos (6 baixos ou 6 altos) são raríssimos
-        - A tendência é o equilíbrio
+        - Extremos (6 números de uma única faixa) são extremamente raros
+        - A tendência é distribuição equilibrada entre as 3 faixas
+        - Ajuda a evitar concentração em apenas uma parte do volante
 
-        **Exemplo:** 12, 18, 25, 38, 45, 56 = 3 Baixos + 3 Altos ✅
+        **Exemplo:** 05, 15, 28, 35, 42, 58 = 2 Baixos (05,15) + 2 Médios (28,35) + 2 Altos (42,58) ✅
         """,
 
         "quadrantes": """
@@ -260,26 +277,37 @@ def explicar_metrica(metrica):
         "score": """
         ### 🏆 Como calculamos o Score Final (0-100)
 
-        **Fórmula Ponderada:**
+        **Fórmula Ponderada Completa (12 Regras):**
 
         ```
-        Score = (Frequência × 0.25) +
-                (Atraso × 0.20) +
-                (Tendência × 0.15) +
-                (Quadrante × 0.15) +
-                (Paridade × 0.10) +
-                (Alto/Baixo × 0.10) +
-                (Poisson × 0.05)
+        Score = (Frequência × 0.14) +
+                (Atraso × 0.14) +
+                (Tendência × 0.09) +
+                (Quadrante × 0.09) +
+                (Paridade × 0.07) +
+                (Baixo/Médio/Alto × 0.07) +
+                (Linhas × 0.07) +
+                (Colunas × 0.07) +
+                (Soma × 0.07) +
+                (Ciclo × 0.05) +
+                (Poisson × 0.05) +
+                (H-N-F × 0.09)  ← NOVA!
         ```
 
-        **Componentes:**
-        1. **Frequência (25%)**: Baseada em aparições históricas
-        2. **Atraso (20%)**: Regressão à média (quanto mais atrasado, maior o score)
-        3. **Tendência (15%)**: Desempenho recente (últimos 50 jogos)
-        4. **Quadrante (15%)**: Equilíbrio espacial no volante
-        5. **Paridade (10%)**: Contribuição para balanço par/ímpar
-        6. **Alto/Baixo (10%)**: Contribuição para balanço de faixas
-        7. **Poisson (5%)**: Probabilidade estatística
+        **12 Componentes do Score:**
+
+        1. **Frequência (14%)**: Baseada em aparições históricas
+        2. **Atraso (14%)**: Regressão à média (quanto mais atrasado, maior o score)
+        3. **Tendência (9%)**: Desempenho recente (últimos 10/20/50 jogos)
+        4. **Quadrante (9%)**: Equilíbrio espacial nos 4 quadrantes do volante
+        5. **Paridade (7%)**: Contribuição para balanço par/ímpar (ideal: 3P-3I)
+        6. **Baixo/Médio/Alto (7%)**: Contribuição para balanço das 3 faixas (ideal: 2B-2M-2A)
+        7. **Linhas (7%)**: Distribuição equilibrada nas 6 linhas do volante
+        8. **Colunas (7%)**: Distribuição equilibrada nas 10 colunas do volante
+        9. **Soma (7%)**: Contribuição para soma ideal (150-200)
+        10. **Ciclo (5%)**: Bônus para números que ainda não apareceram no ciclo atual
+        11. **Poisson (5%)**: Probabilidade estatística de aparição
+        12. **H-N-F (9%)**: 🆕 Faixas de frequência (Quente/Neutro/Frio) - padrões como 2H-2N-2F
 
         **Resultado:** Score de 0 a 100 para cada número
         - 70-100: Excelente
@@ -403,6 +431,514 @@ def sugerir_jogos_por_budget(budget, analyzer, scores_df):
             })
 
     return sugestoes
+
+def gerar_jogo_otimizado(qtd_numeros: int, analyzer, scores_df, numeros_ja_usados: set = None) -> dict:
+    """
+    Gera um jogo otimizado considerando TODAS as 12 análises estatísticas.
+
+    Critérios de seleção (baseados nas 12 análises do score):
+    1. Frequência histórica (14%) - números que mais aparecem
+    2. Atraso/Regressão à média (14%) - números "atrasados"
+    3. Tendência recente (9%) - momentum dos últimos jogos
+    4. Equilíbrio por quadrante (9%) - distribuição espacial
+    5. Paridade par/ímpar (7%) - equilíbrio 3P-3I
+    6. Baixo/Médio/Alto (7%) - equilíbrio 2B-2M-2A
+    7. Distribuição por linhas (7%) - ~1 número por linha
+    8. Distribuição por colunas (7%) - ~0.6 números por coluna
+    9. Soma ideal (7%) - contribuição para soma 150-200
+    10. Ciclo atual (5%) - números faltantes no ciclo
+    11. Probabilidade Poisson (5%) - expectativa estatística
+    12. Faixas H-N-F (9%) - padrões Quente/Neutro/Frio
+
+    Restrições adicionais na geração:
+    - Evitar 4+ números na mesma linha
+    - Evitar 3+ números na mesma coluna
+    - Diversificar entre jogos (evitar repetição)
+    """
+    if numeros_ja_usados is None:
+        numeros_ja_usados = set()
+
+    # Obter dados das análises
+    ciclo_atual = analyzer.obter_ciclo_atual()
+    numeros_faltantes_ciclo = set(ciclo_atual['numeros_faltantes'])
+
+    # Verificar quantos números ainda estão disponíveis (não usados)
+    numeros_disponiveis = set(range(1, 61)) - numeros_ja_usados
+
+    # Criar DUAS listas: candidatos novos (prioridade) e candidatos já usados (backup)
+    candidatos_novos = []
+    candidatos_usados = []
+
+    for _, row in scores_df.iterrows():
+        num = int(row['numero'])
+        score_base = row['score_final']
+
+        # Bônus para números faltantes no ciclo (maior em jogos grandes)
+        bonus_ciclo = 5 if num in numeros_faltantes_ciclo else 0
+        if qtd_numeros > 6 and num in numeros_faltantes_ciclo:
+            bonus_ciclo = 8  # Bônus maior para jogos com mais dezenas
+
+        # Classificações
+        eh_par = num % 2 == 0
+        if 1 <= num <= 20:
+            faixa = 'baixo'
+        elif 21 <= num <= 40:
+            faixa = 'medio'
+        else:
+            faixa = 'alto'
+
+        # Linha e coluna no volante (0-indexed para contagem)
+        linha = (num - 1) // 10  # 0-5
+        coluna = (num - 1) % 10  # 0-9
+
+        cand_info = {
+            'numero': num,
+            'score': score_base + bonus_ciclo,
+            'score_original': score_base,
+            'eh_par': eh_par,
+            'faixa': faixa,
+            'linha': linha,
+            'coluna': coluna,
+            'faltante_ciclo': num in numeros_faltantes_ciclo,
+            'ja_usado': num in numeros_ja_usados
+        }
+
+        # Separar em duas listas: novos vs já usados
+        if num in numeros_ja_usados:
+            candidatos_usados.append(cand_info)
+        else:
+            candidatos_novos.append(cand_info)
+
+    # Ordenar cada lista por score
+    candidatos_novos.sort(key=lambda x: x['score'], reverse=True)
+    candidatos_usados.sort(key=lambda x: x['score'], reverse=True)
+
+    # Combinar: primeiro os novos, depois os usados (como backup)
+    candidatos = candidatos_novos + candidatos_usados
+
+    # Seleção inteligente com equilíbrio
+    selecionados = []
+
+    # Metas de equilíbrio (para jogo de 6 números como referência, escalar para outros)
+    fator = qtd_numeros / 6
+    meta_pares = round(3 * fator)
+    meta_impares = qtd_numeros - meta_pares
+    meta_baixo = round(2 * fator)
+    meta_medio = round(2 * fator)
+    meta_alto = qtd_numeros - meta_baixo - meta_medio
+
+    # Limites de concentração linha/coluna (baseado em análise histórica)
+    max_mesma_linha = 3  # Evitar 4+ números na mesma linha
+    max_mesma_coluna = 2  # Evitar 3+ números na mesma coluna
+
+    # Contadores
+    count_pares = 0
+    count_impares = 0
+    count_baixo = 0
+    count_medio = 0
+    count_alto = 0
+    count_linhas = [0] * 6   # Contagem por linha (0-5)
+    count_colunas = [0] * 10  # Contagem por coluna (0-9)
+
+    # Primeira passada: pegar os melhores respeitando todos os limites
+    for cand in candidatos:
+        if len(selecionados) >= qtd_numeros:
+            break
+
+        # Verificar se adicionar este número ultrapassa os limites
+        pode_adicionar = True
+
+        # Limite de paridade
+        if cand['eh_par'] and count_pares >= meta_pares + 1:
+            pode_adicionar = False
+        if not cand['eh_par'] and count_impares >= meta_impares + 1:
+            pode_adicionar = False
+
+        # Limite de faixa B/M/A
+        if cand['faixa'] == 'baixo' and count_baixo >= meta_baixo + 1:
+            pode_adicionar = False
+        if cand['faixa'] == 'medio' and count_medio >= meta_medio + 1:
+            pode_adicionar = False
+        if cand['faixa'] == 'alto' and count_alto >= meta_alto + 1:
+            pode_adicionar = False
+
+        # Limite de linha (evitar 4+ na mesma linha)
+        if count_linhas[cand['linha']] >= max_mesma_linha:
+            pode_adicionar = False
+
+        # Limite de coluna (evitar 3+ na mesma coluna)
+        if count_colunas[cand['coluna']] >= max_mesma_coluna:
+            pode_adicionar = False
+
+        if pode_adicionar:
+            selecionados.append(cand)
+            if cand['eh_par']:
+                count_pares += 1
+            else:
+                count_impares += 1
+
+            if cand['faixa'] == 'baixo':
+                count_baixo += 1
+            elif cand['faixa'] == 'medio':
+                count_medio += 1
+            else:
+                count_alto += 1
+
+            count_linhas[cand['linha']] += 1
+            count_colunas[cand['coluna']] += 1
+
+    # Segunda passada: se não preencheu, relaxar limites de linha/coluna
+    if len(selecionados) < qtd_numeros:
+        for cand in candidatos:
+            if cand in selecionados:
+                continue
+            if len(selecionados) >= qtd_numeros:
+                break
+
+            # Relaxar: aceitar até 4 na mesma linha, 3 na mesma coluna
+            if count_linhas[cand['linha']] >= 4:
+                continue
+            if count_colunas[cand['coluna']] >= 3:
+                continue
+
+            selecionados.append(cand)
+            count_linhas[cand['linha']] += 1
+            count_colunas[cand['coluna']] += 1
+
+    # Terceira passada: se ainda não preencheu, pegar próximos melhores
+    if len(selecionados) < qtd_numeros:
+        for cand in candidatos:
+            if cand not in selecionados:
+                selecionados.append(cand)
+                if len(selecionados) >= qtd_numeros:
+                    break
+
+    dezenas = sorted([c['numero'] for c in selecionados])
+
+    # Calcular perfil do jogo gerado
+    pares = sum(1 for d in dezenas if d % 2 == 0)
+    impares = len(dezenas) - pares
+    baixos = sum(1 for d in dezenas if 1 <= d <= 20)
+    medios = sum(1 for d in dezenas if 21 <= d <= 40)
+    altos = sum(1 for d in dezenas if 41 <= d <= 60)
+    soma = sum(dezenas)
+    faltantes_incluidos = sum(1 for d in dezenas if d in numeros_faltantes_ciclo)
+
+    # Contagem final de linhas e colunas
+    linhas_final = [0] * 6
+    colunas_final = [0] * 10
+    for d in dezenas:
+        linhas_final[(d - 1) // 10] += 1
+        colunas_final[(d - 1) % 10] += 1
+
+    max_linha = max(linhas_final)
+    max_coluna = max(colunas_final)
+    linhas_usadas = 6 - linhas_final.count(0)
+    colunas_usadas = 10 - colunas_final.count(0)
+
+    # Score médio dos números selecionados
+    score_medio = np.mean([c['score_original'] for c in selecionados])
+
+    # Alertas de distribuição
+    alertas_dist = []
+    if max_linha >= 4:
+        alertas_dist.append(f"⚠️ {max_linha} nums mesma linha")
+    if max_coluna >= 3:
+        alertas_dist.append(f"⚠️ {max_coluna} nums mesma coluna")
+
+    return {
+        'dezenas': dezenas,
+        'perfil': {
+            'pares': pares,
+            'impares': impares,
+            'baixos': baixos,
+            'medios': medios,
+            'altos': altos,
+            'soma': soma,
+            'score_medio': round(score_medio, 2),
+            'faltantes_ciclo': faltantes_incluidos,
+            'max_linha': max_linha,
+            'max_coluna': max_coluna,
+            'linhas_usadas': linhas_usadas,
+            'colunas_usadas': colunas_usadas,
+            'alertas_distribuicao': alertas_dist
+        }
+    }
+
+
+def calcular_probabilidade_combinada(jogos):
+    """
+    Calcula a probabilidade combinada de acertar sena/quina/quadra
+    considerando TODOS os jogos juntos.
+
+    A probabilidade de acertar pelo menos uma vez em N jogos independentes:
+    P(pelo menos 1) = 1 - P(não acertar nenhum)
+    P(pelo menos 1) = 1 - (1-p1) * (1-p2) * ... * (1-pN)
+    """
+    from config import PROBABILIDADES
+
+    # Inicializar probabilidade de NÃO acertar
+    prob_nao_acertar_sena = 1.0
+    prob_nao_acertar_quina = 1.0
+    prob_nao_acertar_quadra = 1.0
+
+    for jogo in jogos:
+        qtd = jogo['quantidade_numeros']
+        if qtd in PROBABILIDADES:
+            prob_sena, prob_quina, prob_quadra = PROBABILIDADES[qtd]
+
+            # Probabilidade de NÃO acertar este jogo
+            prob_nao_acertar_sena *= (1 - 1/prob_sena)
+            prob_nao_acertar_quina *= (1 - 1/prob_quina)
+            prob_nao_acertar_quadra *= (1 - 1/prob_quadra)
+
+    # Probabilidade de acertar PELO MENOS uma vez
+    prob_acertar_sena = 1 - prob_nao_acertar_sena
+    prob_acertar_quina = 1 - prob_nao_acertar_quina
+    prob_acertar_quadra = 1 - prob_nao_acertar_quadra
+
+    # Converter para "1 em X"
+    chance_sena = 1 / prob_acertar_sena if prob_acertar_sena > 0 else float('inf')
+    chance_quina = 1 / prob_acertar_quina if prob_acertar_quina > 0 else float('inf')
+    chance_quadra = 1 / prob_acertar_quadra if prob_acertar_quadra > 0 else float('inf')
+
+    return {
+        'prob_sena': prob_acertar_sena,
+        'prob_quina': prob_acertar_quina,
+        'prob_quadra': prob_acertar_quadra,
+        'chance_sena': chance_sena,
+        'chance_quina': chance_quina,
+        'chance_quadra': chance_quadra,
+        'percentual_sena': prob_acertar_sena * 100,
+        'percentual_quina': prob_acertar_quina * 100,
+        'percentual_quadra': prob_acertar_quadra * 100
+    }
+
+
+def calcular_indice_perfeicao(jogos):
+    """
+    Calcula um índice de 0-100% que representa o quão próximo
+    os jogos sugeridos estão do "perfil ideal" baseado nos 11 indicadores.
+
+    Critérios avaliados (cada um vale até 100 pontos):
+    1. Score médio dos números (vs. máximo teórico)
+    2. Equilíbrio par/ímpar (ideal ~50/50)
+    3. Equilíbrio baixo/médio/alto (ideal ~33/33/33)
+    4. Soma na faixa ideal (150-200 para 6 números, proporcional para mais)
+    5. Distribuição de linhas (todas 6 representadas)
+    6. Distribuição de colunas (máximo possível representado)
+    7. Números do ciclo incluídos
+    8. Diversificação entre jogos (números únicos)
+    """
+    if not jogos:
+        return {'indice_total': 0, 'detalhes': {}}
+
+    pontuacoes = []
+    detalhes = {}
+
+    # 1. Score médio (quanto maior melhor, max teórico ~100)
+    scores_medios = [j.get('perfil', {}).get('score_medio', 50) for j in jogos]
+    score_medio_geral = sum(scores_medios) / len(scores_medios) if scores_medios else 50
+    # Normalizar: score de 50 = 50%, score de 100 = 100%
+    pont_score = min(100, score_medio_geral)
+    pontuacoes.append(pont_score)
+    detalhes['score_medio'] = {'valor': round(score_medio_geral, 1), 'pontos': round(pont_score, 1)}
+
+    # 2. Equilíbrio par/ímpar (ideal: 50/50, tolerância de 10%)
+    desvios_paridade = []
+    for jogo in jogos:
+        perfil = jogo.get('perfil', {})
+        pares = perfil.get('pares', 0)
+        total = jogo['quantidade_numeros']
+        ideal = total / 2
+        desvio = abs(pares - ideal) / ideal if ideal > 0 else 0
+        desvios_paridade.append(desvio)
+    desvio_medio_paridade = sum(desvios_paridade) / len(desvios_paridade) if desvios_paridade else 0
+    pont_paridade = max(0, 100 - desvio_medio_paridade * 200)  # 10% desvio = 80 pontos
+    pontuacoes.append(pont_paridade)
+    detalhes['paridade'] = {'desvio': f"{desvio_medio_paridade*100:.1f}%", 'pontos': round(pont_paridade, 1)}
+
+    # 3. Equilíbrio baixo/médio/alto (ideal: 33/33/33)
+    desvios_bma = []
+    for jogo in jogos:
+        perfil = jogo.get('perfil', {})
+        baixos = perfil.get('baixos', 0)
+        medios = perfil.get('medios', 0)
+        altos = perfil.get('altos', 0)
+        total = jogo['quantidade_numeros']
+        ideal = total / 3
+        desvio = (abs(baixos - ideal) + abs(medios - ideal) + abs(altos - ideal)) / (3 * ideal) if ideal > 0 else 0
+        desvios_bma.append(desvio)
+    desvio_medio_bma = sum(desvios_bma) / len(desvios_bma) if desvios_bma else 0
+    pont_bma = max(0, 100 - desvio_medio_bma * 150)
+    pontuacoes.append(pont_bma)
+    detalhes['baixo_medio_alto'] = {'desvio': f"{desvio_medio_bma*100:.1f}%", 'pontos': round(pont_bma, 1)}
+
+    # 4. Soma na faixa ideal (proporcional ao número de dezenas)
+    pontos_soma = []
+    for jogo in jogos:
+        perfil = jogo.get('perfil', {})
+        soma = perfil.get('soma', 0)
+        qtd = jogo['quantidade_numeros']
+        # Soma ideal proporcional: para 6 números = 175 (média), escala linear
+        soma_ideal = 175 * qtd / 6
+        soma_min = 150 * qtd / 6
+        soma_max = 200 * qtd / 6
+
+        if soma_min <= soma <= soma_max:
+            pont = 100
+        else:
+            desvio = min(abs(soma - soma_min), abs(soma - soma_max)) / soma_ideal
+            pont = max(0, 100 - desvio * 200)
+        pontos_soma.append(pont)
+    pont_soma_media = sum(pontos_soma) / len(pontos_soma) if pontos_soma else 0
+    pontuacoes.append(pont_soma_media)
+    detalhes['soma_ideal'] = {'pontos': round(pont_soma_media, 1)}
+
+    # 5. Distribuição de linhas (usar todas as 6 linhas entre os jogos)
+    todas_linhas = set()
+    for jogo in jogos:
+        dezenas = jogo['dezenas']
+        for d in dezenas:
+            linha = (d - 1) // 10
+            todas_linhas.add(linha)
+    pont_linhas = (len(todas_linhas) / 6) * 100
+    pontuacoes.append(pont_linhas)
+    detalhes['cobertura_linhas'] = {'usadas': len(todas_linhas), 'total': 6, 'pontos': round(pont_linhas, 1)}
+
+    # 6. Distribuição de colunas (usar todas as 10 colunas entre os jogos)
+    todas_colunas = set()
+    for jogo in jogos:
+        dezenas = jogo['dezenas']
+        for d in dezenas:
+            coluna = (d - 1) % 10
+            todas_colunas.add(coluna)
+    pont_colunas = (len(todas_colunas) / 10) * 100
+    pontuacoes.append(pont_colunas)
+    detalhes['cobertura_colunas'] = {'usadas': len(todas_colunas), 'total': 10, 'pontos': round(pont_colunas, 1)}
+
+    # 7. Números do ciclo incluídos
+    faltantes_incluidos = []
+    for jogo in jogos:
+        perfil = jogo.get('perfil', {})
+        faltantes = perfil.get('faltantes_ciclo', 0)
+        faltantes_incluidos.append(faltantes)
+    media_faltantes = sum(faltantes_incluidos) / len(faltantes_incluidos) if faltantes_incluidos else 0
+    # Ideal: quanto mais números do ciclo, melhor (max 6 por jogo de 6 dezenas)
+    pont_ciclo = min(100, media_faltantes * 20)  # 5+ números = 100 pontos
+    pontuacoes.append(pont_ciclo)
+    detalhes['numeros_ciclo'] = {'media': round(media_faltantes, 1), 'pontos': round(pont_ciclo, 1)}
+
+    # 8. Diversificação (números únicos vs. total de números jogados)
+    todos_numeros = []
+    numeros_unicos = set()
+    for jogo in jogos:
+        dezenas = jogo['dezenas']
+        todos_numeros.extend(dezenas)
+        numeros_unicos.update(dezenas)
+    taxa_diversificacao = len(numeros_unicos) / len(todos_numeros) if todos_numeros else 0
+    pont_diversificacao = taxa_diversificacao * 100
+    pontuacoes.append(pont_diversificacao)
+    detalhes['diversificacao'] = {
+        'unicos': len(numeros_unicos),
+        'total': len(todos_numeros),
+        'taxa': f"{taxa_diversificacao*100:.1f}%",
+        'pontos': round(pont_diversificacao, 1)
+    }
+
+    # Índice final (média ponderada)
+    pesos = [0.20, 0.15, 0.15, 0.10, 0.10, 0.10, 0.10, 0.10]  # Soma = 1.0
+    indice_total = sum(p * pont for p, pont in zip(pesos, pontuacoes))
+
+    return {
+        'indice_total': round(indice_total, 1),
+        'detalhes': detalhes,
+        'classificacao': 'Excelente' if indice_total >= 85 else 'Muito Bom' if indice_total >= 70 else 'Bom' if indice_total >= 55 else 'Regular'
+    }
+
+
+def otimizar_budget_completo(budget, analyzer, scores_df):
+    """
+    Otimiza o uso COMPLETO do budget, gastando TODO o dinheiro disponível
+    combinando diferentes tipos de jogos para maximizar cobertura.
+    Usa a função gerar_jogo_otimizado para criar jogos inteligentes.
+    """
+    budget_restante = budget
+    jogos_selecionados = []
+    numeros_ja_usados = set()
+
+    # Estratégia: começar com jogos maiores e ir preenchendo com menores
+    # para gastar TODO o dinheiro
+
+    # Passo 1: Tentar encaixar 1 jogo grande (15-20 números) se o budget permitir
+    for qtd_nums in [20, 19, 18, 17, 16, 15]:
+        custo = TABELA_CAIXA[qtd_nums]['valor']
+        if custo <= budget_restante and custo >= budget_restante * 0.4:  # Usa até 40% do budget em um jogo
+            # Gerar jogo otimizado
+            jogo = gerar_jogo_otimizado(qtd_nums, analyzer, scores_df, numeros_ja_usados)
+            dezenas = jogo['dezenas']
+            numeros_ja_usados.update(dezenas)
+
+            jogos_selecionados.append({
+                'tipo': f'Jogo Principal ({qtd_nums} números)',
+                'quantidade_numeros': qtd_nums,
+                'dezenas': dezenas,
+                'custo': custo,
+                'prob_sena': TABELA_CAIXA[qtd_nums]['prob_sena'],
+                'estrategia': 'Otimizado por Score + Ciclo',
+                'perfil': jogo['perfil']
+            })
+            budget_restante -= custo
+            break
+
+    # Passo 2: Preencher o resto com jogos médios e pequenos
+    while budget_restante >= 6.00:  # Mínimo para um jogo simples
+        melhor_opcao = None
+
+        # Tentar jogos de 10-14 números (cobertura média)
+        for qtd_nums in [14, 13, 12, 11, 10]:
+            custo = TABELA_CAIXA[qtd_nums]['valor']
+            if custo <= budget_restante:
+                melhor_opcao = qtd_nums
+                break
+
+        # Se não couber médio, tentar jogos pequenos (6-9)
+        if not melhor_opcao:
+            for qtd_nums in [9, 8, 7, 6]:
+                custo = TABELA_CAIXA[qtd_nums]['valor']
+                if custo <= budget_restante:
+                    melhor_opcao = qtd_nums
+                    break
+
+        if not melhor_opcao:
+            break  # Não consegue encaixar mais nada
+
+        # Gerar jogo otimizado evitando números já usados
+        jogo = gerar_jogo_otimizado(melhor_opcao, analyzer, scores_df, numeros_ja_usados)
+        dezenas = jogo['dezenas']
+        numeros_ja_usados.update(dezenas)
+
+        custo = TABELA_CAIXA[melhor_opcao]['valor']
+
+        jogos_selecionados.append({
+            'tipo': f'Jogo Complementar ({melhor_opcao} números)',
+            'quantidade_numeros': melhor_opcao,
+            'dezenas': dezenas,
+            'custo': custo,
+            'prob_sena': TABELA_CAIXA[melhor_opcao]['prob_sena'],
+            'estrategia': 'Otimizado por Score + Ciclo',
+            'perfil': jogo['perfil']
+        })
+
+        budget_restante -= custo
+
+    return {
+        'jogos': jogos_selecionados,
+        'total_gasto': budget - budget_restante,
+        'total_jogos': len(jogos_selecionados),
+        'resto': budget_restante,
+        'aproveitamento': ((budget - budget_restante) / budget) * 100
+    }
 
 def criar_grafico_frequencias(analyzer):
     """Cria gráfico de barras de frequências."""
@@ -608,6 +1144,134 @@ def criar_grafico_colunas_volante(analyzer):
 
     return fig
 
+def criar_mapa_calor_volante(analyzer):
+    """Cria mapa de calor do volante cruzando linhas e colunas."""
+    df = analyzer.df
+
+    # Criar matriz 6x10 (6 linhas x 10 colunas)
+    matriz_volante = np.zeros((6, 10))
+
+    # Mapear cada número para sua posição no volante
+    # Linha = (numero - 1) // 10
+    # Coluna = (numero - 1) % 10
+
+    # Contar frequência de cada número
+    for idx, row in df.iterrows():
+        jogo = [row['D1'], row['D2'], row['D3'], row['D4'], row['D5'], row['D6']]
+        for num in jogo:
+            linha = (num - 1) // 10  # 0-5
+            coluna = (num - 1) % 10   # 0-9
+            matriz_volante[linha][coluna] += 1
+
+    # Criar labels das linhas e colunas
+    labels_linhas = ['L1 (01-10)', 'L2 (11-20)', 'L3 (21-30)', 'L4 (31-40)', 'L5 (41-50)', 'L6 (51-60)']
+    labels_colunas = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10']
+
+    # Criar texto para cada célula (número + frequência)
+    texto_celulas = []
+    for i in range(6):
+        linha_texto = []
+        for j in range(10):
+            numero = i * 10 + j + 1
+            freq = int(matriz_volante[i][j])
+            linha_texto.append(f"{numero:02d}<br>({freq})")
+        texto_celulas.append(linha_texto)
+
+    # Criar heatmap
+    fig = go.Figure(data=go.Heatmap(
+        z=matriz_volante,
+        x=labels_colunas,
+        y=labels_linhas,
+        text=texto_celulas,
+        texttemplate='%{text}',
+        textfont={"size": 10},
+        colorscale='RdYlGn',
+        colorbar=dict(title="Frequência"),
+        hoverongaps=False,
+        hovertemplate='<b>%{y} - %{x}</b><br>Frequência: %{z}<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title="Mapa de Calor do Volante - Cruzamento Linhas × Colunas",
+        xaxis_title="Colunas (Vertical)",
+        yaxis_title="Linhas (Horizontal)",
+        height=600,
+        xaxis={'side': 'top'}
+    )
+
+    return fig
+
+def criar_grafico_paridade(analyzer):
+    """Cria gráfico de pizza para padrões Par/Ímpar."""
+    paridade = analyzer.analisar_paridade()
+
+    # Pegar top 8 padrões
+    top_padroes = list(paridade.items())[:8]
+    labels = [padrao for padrao, _ in top_padroes]
+    values = [count for _, count in top_padroes]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.3,
+        textinfo='label+percent',
+        textposition='auto',
+        marker=dict(
+            colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2']
+        )
+    )])
+
+    fig.update_layout(
+        title="Distribuição de Padrões Par/Ímpar",
+        height=500,
+        showlegend=True
+    )
+
+    return fig
+
+def criar_grafico_baixo_medio_alto(analyzer):
+    """Cria gráfico de pizza para padrões Baixo/Médio/Alto."""
+    df = analyzer.df
+
+    # Analisar padrão Baixo (1-20), Médio (21-40), Alto (41-60)
+    padroes = {}
+
+    for idx, row in df.iterrows():
+        jogo = [row['D1'], row['D2'], row['D3'], row['D4'], row['D5'], row['D6']]
+        baixos = sum(1 for num in jogo if 1 <= num <= 20)
+        medios = sum(1 for num in jogo if 21 <= num <= 40)
+        altos = sum(1 for num in jogo if 41 <= num <= 60)
+
+        padrao = f"{baixos}B-{medios}M-{altos}A"
+        padroes[padrao] = padroes.get(padrao, 0) + 1
+
+    # Ordenar por frequência
+    padroes_sorted = sorted(padroes.items(), key=lambda x: x[1], reverse=True)
+
+    # Pegar top 10 padrões
+    top_padroes = padroes_sorted[:10]
+    labels = [padrao for padrao, _ in top_padroes]
+    values = [count for _, count in top_padroes]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.3,
+        textinfo='label+percent',
+        textposition='auto',
+        marker=dict(
+            colors=['#3498DB', '#E74C3C', '#2ECC71', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22', '#34495E', '#16A085', '#C0392B']
+        )
+    )])
+
+    fig.update_layout(
+        title="Distribuição de Padrões Baixo/Médio/Alto",
+        height=500,
+        showlegend=True
+    )
+
+    return fig
+
 def criar_grafico_ciclos(analyzer):
     """Cria gráfico de análise de ciclos de renovação."""
     analise_ciclos = analyzer.analisar_ciclos_renovacao_completa()
@@ -654,9 +1318,121 @@ def criar_grafico_ciclos(analyzer):
 # ============================================================================
 
 def main():
+    # Arquivo padrão com histórico real
+    ARQUIVO_PADRAO = "/Users/rz80/Documents/megasena/resultadosmega.xlsx"
+
+    # Inicializar session_state para persistência de dados
+    if 'dados_carregados' not in st.session_state:
+        # Placeholder para mensagens de status
+        status_placeholder = st.empty()
+
+        import os
+        if os.path.exists(ARQUIVO_PADRAO):
+            try:
+                # Feedback visual: Carregando arquivo
+                with status_placeholder.container():
+                    st.info(f"📂 **Carregando histórico...**")
+                    st.caption(f"Arquivo: `{ARQUIVO_PADRAO}`")
+
+                df_padrao = pd.read_excel(ARQUIVO_PADRAO)
+
+                # Feedback visual: Processando
+                with status_placeholder.container():
+                    st.info(f"🔬 **Processando {len(df_padrao):,} registros...**")
+
+                # Normaliza colunas
+                df_padrao.columns = [str(c).strip() for c in df_padrao.columns]
+
+                # Detecta colunas de dezenas (várias variações)
+                colunas_dezenas = None
+                # Variação 1: "bola 1", "bola 2", etc (com espaço, minúsculo)
+                if all(f'bola {i}' in df_padrao.columns for i in range(1, 7)):
+                    colunas_dezenas = [f'bola {i}' for i in range(1, 7)]
+                # Variação 2: "Bola1", "Bola2", etc (sem espaço)
+                elif all(f'Bola{i}' in df_padrao.columns for i in range(1, 7)):
+                    colunas_dezenas = [f'Bola{i}' for i in range(1, 7)]
+                # Variação 3: "D1", "D2", etc
+                elif all(f'D{i}' in df_padrao.columns for i in range(1, 7)):
+                    colunas_dezenas = [f'D{i}' for i in range(1, 7)]
+
+                if colunas_dezenas:
+                    # Renomeia para padrão D1-D6
+                    for i, col in enumerate(colunas_dezenas, 1):
+                        df_padrao = df_padrao.rename(columns={col: f'D{i}'})
+
+                    # Garante coluna Concurso
+                    if 'Concurso' not in df_padrao.columns:
+                        for col in df_padrao.columns:
+                            if 'concurso' in col.lower():
+                                df_padrao = df_padrao.rename(columns={col: 'Concurso'})
+                                break
+                        else:
+                            df_padrao['Concurso'] = range(1, len(df_padrao) + 1)
+
+                    st.session_state.dados_carregados = df_padrao
+                    st.session_state.nome_arquivo = "resultadosmega.xlsx"
+                    st.session_state.fonte_dados = "Histórico Oficial"
+                    st.session_state.caminho_arquivo = ARQUIVO_PADRAO
+
+                    # Feedback visual: Sucesso
+                    status_placeholder.success(f"✅ **Carregado:** {len(df_padrao):,} concursos do histórico oficial")
+                else:
+                    st.session_state.dados_carregados = None
+                    st.session_state.nome_arquivo = None
+                    st.session_state.fonte_dados = "Demonstração"
+                    st.session_state.caminho_arquivo = None
+                    status_placeholder.warning("⚠️ Formato de arquivo não reconhecido. Usando demonstração.")
+            except Exception as e:
+                st.session_state.dados_carregados = None
+                st.session_state.nome_arquivo = None
+                st.session_state.fonte_dados = "Demonstração"
+                st.session_state.caminho_arquivo = None
+                status_placeholder.error(f"❌ Erro ao carregar: {str(e)}")
+        else:
+            st.session_state.dados_carregados = None
+            st.session_state.nome_arquivo = None
+            st.session_state.fonte_dados = "Demonstração"
+            st.session_state.caminho_arquivo = None
+
     # Header
     st.markdown('<div class="main-header">🎰 MEGA-SENA</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Análise Estatística Avançada com IA</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Análise Estatística Avançada com 12 Critérios</div>', unsafe_allow_html=True)
+
+    # Resumo das 12 Análises
+    with st.expander("📊 **Sistema de 12 Análises Estatísticas** - Clique para ver detalhes", expanded=False):
+        st.markdown("""
+        ### Como funciona nosso sistema de análise?
+
+        Cada número de 1 a 60 recebe um **Score de 0 a 100** baseado em **12 critérios estatísticos**:
+
+        | # | Análise | Peso | O que mede |
+        |---|---------|------|------------|
+        | 1 | **Frequência Histórica** | 14% | Quantas vezes o número apareceu em todos os sorteios |
+        | 2 | **Atraso (Regressão à Média)** | 14% | Há quantos sorteios o número não aparece - números "atrasados" tendem a sair |
+        | 3 | **Tendência Recente** | 9% | Se o número está "quente" ou "frio" nos últimos 10 jogos |
+        | 4 | **Equilíbrio por Quadrante** | 9% | Distribuição espacial no volante (4 quadrantes) |
+        | 5 | **Paridade Par/Ímpar** | 7% | Contribuição para equilíbrio 3 pares - 3 ímpares |
+        | 6 | **Baixo/Médio/Alto** | 7% | Contribuição para equilíbrio 2B-2M-2A (3 faixas de 20 números) |
+        | 7 | **Distribuição por Linhas** | 7% | Equilíbrio entre as 6 linhas do volante (~1 número/linha) |
+        | 8 | **Distribuição por Colunas** | 7% | Equilíbrio entre as 10 colunas (~0.6 números/coluna) |
+        | 9 | **Soma Ideal** | 7% | Contribuição para soma total entre 150-200 (faixa mais comum) |
+        | 10 | **Ciclo Atual** | 5% | Se o número ainda não apareceu no ciclo de renovação atual |
+        | 11 | **Probabilidade Poisson** | 5% | Expectativa estatística de aparição baseada em distribuição |
+        | 12 | **Faixas H-N-F** 🆕 | 9% | Padrões Quente/Neutro/Frio - equilíbrio 2H-2N-2F mais comum |
+
+        ---
+
+        ### Na geração de jogos, também aplicamos:
+
+        - **Limite de Linha:** Máximo 3 números na mesma linha (4+ é raro: ~5% histórico)
+        - **Limite de Coluna:** Máximo 2 números na mesma coluna (3+ é raro: ~8% histórico)
+        - **Diversificação:** Penalidade para números repetidos entre jogos
+        - **Bônus Ciclo:** Prioridade para números faltantes no ciclo atual
+
+        ---
+
+        💡 **Resultado:** Jogos estatisticamente balanceados que seguem os padrões históricos mais frequentes!
+        """, unsafe_allow_html=True)
 
     # ========================================================================
     # SIDEBAR - CONFIGURAÇÕES
@@ -668,18 +1444,18 @@ def main():
 
         st.markdown("---")
 
-        # Upload de arquivo
-        st.subheader("📁 Carregar Dados")
-        opcao_dados = st.radio(
-            "Fonte dos dados:",
-            ["Demonstração (Sintético)", "Upload Excel", "Upload CSV"]
-        )
+        # Informações da base de dados
+        st.subheader("📁 Base de Dados")
 
-        uploaded_file = None
-        if opcao_dados == "Upload Excel":
-            uploaded_file = st.file_uploader("Escolha o arquivo Excel", type=['xlsx', 'xls'])
-        elif opcao_dados == "Upload CSV":
-            uploaded_file = st.file_uploader("Escolha o arquivo CSV", type=['csv'])
+        # Mostrar status dos dados atuais
+        if st.session_state.dados_carregados is not None:
+            st.success(f"✅ **{st.session_state.fonte_dados}**")
+            st.caption(f"📊 **{len(st.session_state.dados_carregados):,} concursos**")
+            # Mostrar caminho do arquivo
+            if hasattr(st.session_state, 'caminho_arquivo') and st.session_state.caminho_arquivo:
+                st.code(st.session_state.caminho_arquivo, language=None)
+        else:
+            st.warning("⚠️ Usando dados de demonstração")
 
         st.markdown("---")
 
@@ -700,7 +1476,7 @@ def main():
         # Info
         st.info("""
         **Como usar:**
-        1. Carregue seus dados ou use demonstração
+        1. Carregue seus dados (fica salvo na sessão!)
         2. Defina seu budget
         3. Explore as análises nas abas
         4. Veja as sugestões personalizadas
@@ -713,15 +1489,13 @@ def main():
     # CARREGAR DADOS
     # ========================================================================
 
-    with st.spinner("Carregando dados..."):
-        if opcao_dados == "Demonstração (Sintético)":
-            df = carregar_dados('synthetic')
-        elif opcao_dados == "Upload Excel" and uploaded_file:
-            df = carregar_dados('excel', uploaded_file)
-        elif opcao_dados == "Upload CSV" and uploaded_file:
-            df = carregar_dados('csv', uploaded_file)
+    with st.spinner("🔬 Processando análises estatísticas..."):
+        # Usar dados carregados ou demonstração
+        if st.session_state.dados_carregados is not None:
+            df = st.session_state.dados_carregados
         else:
-            df = carregar_dados('synthetic')
+            df = carregar_dados_sinteticos()
+            st.session_state.fonte_dados = "Demonstração"
 
         analyzer = MegaSenaAnalyzer(df)
 
@@ -752,12 +1526,11 @@ def main():
     # TABS PRINCIPAIS
     # ========================================================================
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Análises Estatísticas",
-        "🏆 Ranking de Scores",
         "🔬 Análises Avançadas",
+        "🏆 Ranking de Scores",
         "📋 Perfis de Jogos",
-        "🎯 Estratégias",
         "🎲 Sugestão Personalizada",
         "💰 Tabela de Custos",
         "💾 Dados Brutos"
@@ -813,6 +1586,12 @@ def main():
             st.markdown(explicar_metrica("paridade"))
 
         paridade = analyzer.analisar_paridade()
+
+        # Gráfico de pizza
+        fig_paridade = criar_grafico_paridade(analyzer)
+        st.plotly_chart(fig_paridade, use_container_width=True)
+
+        # Top 5 textual
         st.write("**Top 5 Padrões Mais Comuns:**")
         for i, (padrao, count) in enumerate(list(paridade.items())[:5], 1):
             porcentagem = (count / len(df)) * 100
@@ -820,15 +1599,32 @@ def main():
 
         st.markdown("---")
 
-        # Alto/Baixo
-        st.subheader("4️⃣ Análise Alto/Baixo")
+        # Baixo/Médio/Alto
+        st.subheader("4️⃣ Análise Baixo/Médio/Alto")
 
         with st.expander("📖 Como Calculamos esta Métrica", expanded=False):
             st.markdown(explicar_metrica("alto_baixo"))
 
-        alto_baixo = analyzer.analisar_alto_baixo()
+        # Gráfico de pizza
+        fig_bma = criar_grafico_baixo_medio_alto(analyzer)
+        st.plotly_chart(fig_bma, use_container_width=True)
+
+        # Calcular padrões para exibição textual
+        df_temp = analyzer.df
+        padroes_bma = {}
+
+        for idx, row in df_temp.iterrows():
+            jogo = [row['D1'], row['D2'], row['D3'], row['D4'], row['D5'], row['D6']]
+            baixos = sum(1 for num in jogo if 1 <= num <= 20)
+            medios = sum(1 for num in jogo if 21 <= num <= 40)
+            altos = sum(1 for num in jogo if 41 <= num <= 60)
+            padrao = f"{baixos}B-{medios}M-{altos}A"
+            padroes_bma[padrao] = padroes_bma.get(padrao, 0) + 1
+
+        padroes_bma_sorted = sorted(padroes_bma.items(), key=lambda x: x[1], reverse=True)
+
         st.write("**Top 5 Padrões Mais Comuns:**")
-        for i, (padrao, count) in enumerate(list(alto_baixo.items())[:5], 1):
+        for i, (padrao, count) in enumerate(padroes_bma_sorted[:5], 1):
             porcentagem = (count / len(df)) * 100
             st.write(f"{i}. **{padrao}** - {count} vezes ({porcentagem:.1f}%)")
 
@@ -857,11 +1653,94 @@ def main():
             st.metric("Quadrante 4", f"{quadrantes['Q4']['media_aparicoes']:.2f}",
                      delta=f"{quadrantes['Q4']['media_aparicoes']-1.5:.2f}")
 
+        st.markdown("---")
+
+        # Faixas de Frequência H-N-F (NOVA - 12ª regra)
+        st.subheader("6️⃣ Análise de Faixas de Frequência (H-N-F)")
+
+        with st.expander("📖 Como Calculamos esta Métrica", expanded=False):
+            st.markdown("""
+            ### 🔥 Faixas de Frequência: Quente (H), Neutro (N) e Frio (F)
+
+            Esta análise classifica os 60 números em **3 faixas** baseado na frequência histórica:
+
+            | Faixa | Descrição | Números |
+            |-------|-----------|---------|
+            | **H (Hot/Quente)** | Top 20 mais frequentes | 20 números |
+            | **N (Neutro)** | 20 números do meio | 20 números |
+            | **F (Frio/Cold)** | 20 menos frequentes | 20 números |
+
+            ### 📊 Padrões de Combinação
+
+            Para cada sorteio, analisamos quantos números de cada faixa foram sorteados:
+            - **2H-2N-2F**: 2 quentes, 2 neutros, 2 frios (equilibrado)
+            - **3H-2N-1F**: 3 quentes, 2 neutros, 1 frio
+            - etc.
+
+            ### 🎯 Por que é importante?
+
+            Os padrões mais frequentes historicamente tendem a se repetir.
+            Jogos equilibrados (próximos de 2-2-2) aparecem mais vezes.
+            Esta é a **12ª regra** do nosso sistema de análise.
+            """)
+
+        # Classificação dos números
+        classificacao_hnf = analyzer.classificar_numeros_por_frequencia()
+        padroes_hnf = analyzer.analisar_padroes_hnf()
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.success(f"""
+            **🔥 Números QUENTES (Top 20)**
+
+            {', '.join([f'{n:02d}' for n in classificacao_hnf['quente']])}
+            """)
+
+        with col2:
+            st.info(f"""
+            **⚖️ Números NEUTROS (Meio)**
+
+            {', '.join([f'{n:02d}' for n in classificacao_hnf['neutro']])}
+            """)
+
+        with col3:
+            st.warning(f"""
+            **❄️ Números FRIOS (Bottom 20)**
+
+            {', '.join([f'{n:02d}' for n in classificacao_hnf['frio']])}
+            """)
+
+        # Gráfico de pizza dos padrões H-N-F
+        padroes_data = padroes_hnf['top_5_padroes']
+        fig_hnf = go.Figure(data=[go.Pie(
+            labels=[p[0] for p in padroes_data],
+            values=[p[1] for p in padroes_data],
+            hole=0.4,
+            textinfo='label+percent',
+            marker_colors=['#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1', '#ff9ff3']
+        )])
+        fig_hnf.update_layout(
+            title="Top 5 Padrões H-N-F Mais Comuns",
+            showlegend=True
+        )
+        st.plotly_chart(fig_hnf, use_container_width=True)
+
+        # Top 5 padrões textual
+        st.write("**Top 5 Padrões Mais Comuns:**")
+        for i, (padrao, pct) in enumerate(padroes_data, 1):
+            st.write(f"{i}. **{padrao}** - {pct:.1f}%")
+
+        st.markdown(f"""
+        **📌 Padrões Recomendados** (cobrem ~{padroes_hnf['cobertura_recomendados']:.0f}% dos sorteios):
+        `{', '.join(padroes_hnf['padroes_recomendados'])}`
+        """)
+
     # ------------------------------------------------------------------------
     # TAB 2: RANKING DE SCORES COM EXPLICAÇÃO
     # ------------------------------------------------------------------------
 
-    with tab2:
+    with tab3:
         st.header("🏆 Ranking de Scores (0-100)")
 
         with st.expander("📖 Como Calculamos o Score Final", expanded=True):
@@ -901,10 +1780,10 @@ def main():
             )
 
     # ------------------------------------------------------------------------
-    # TAB 3: ANÁLISES AVANÇADAS
+    # TAB 3: ANÁLISES AVANÇADAS (agora é TAB 2)
     # ------------------------------------------------------------------------
 
-    with tab3:
+    with tab2:
         st.header("🔬 Análises Avançadas do Volante")
 
         st.info("""
@@ -985,6 +1864,152 @@ def main():
 
         st.markdown("---")
 
+        # NOVO: Padrões a Evitar na Geração de Jogos
+        st.subheader("⚠️ Padrões de Concentração a Evitar")
+
+        with st.expander("📖 Por que evitar concentrações", expanded=False):
+            st.markdown("""
+            ### ⚠️ Concentração de Números
+
+            **Problema:** Jogos com muitos números na mesma linha ou coluna são **estatisticamente raros**.
+
+            **Por que isso importa:**
+            - Se 4+ números caem na mesma linha, a probabilidade histórica é muito baixa
+            - Se 3+ números caem na mesma coluna, também é raro
+            - Evitar esses padrões melhora a "qualidade estatística" do jogo
+
+            **Nossa Estratégia:**
+            - Limitar a **máximo 3 números na mesma linha**
+            - Limitar a **máximo 2 números na mesma coluna**
+            - Garantir boa dispersão pelo volante
+            """)
+
+        # Análise de padrões históricos
+        padrao_linhas = analyzer.analisar_padrao_linhas_jogo()
+        padrao_colunas = analyzer.analisar_padrao_colunas_jogo()
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### 📐 Concentração por Linha")
+            st.metric(
+                "Jogos com 4+ mesma linha",
+                f"{padrao_linhas['evitar_4_ou_mais_mesma_linha']:.1f}%",
+                delta="EVITAR",
+                delta_color="inverse"
+            )
+            st.write(f"Média histórica: **{padrao_linhas['media_max_por_linha']:.2f}** números/linha máx")
+
+            st.markdown("**Distribuição histórica:**")
+            for k, v in padrao_linhas['max_numeros_mesma_linha'].items():
+                emoji = "🟢" if "1_" in k or "2_" in k else ("🟡" if "3_" in k else "🔴")
+                st.write(f"{emoji} {k.replace('_', ' ')}: {v:.1f}%")
+
+        with col2:
+            st.markdown("### 📊 Concentração por Coluna")
+            st.metric(
+                "Jogos com 3+ mesma coluna",
+                f"{padrao_colunas['evitar_3_ou_mais_mesma_coluna']:.1f}%",
+                delta="EVITAR",
+                delta_color="inverse"
+            )
+            st.write(f"Média histórica: **{padrao_colunas['media_max_por_coluna']:.2f}** números/coluna máx")
+
+            st.markdown("**Distribuição histórica:**")
+            for k, v in padrao_colunas['max_numeros_mesma_coluna'].items():
+                emoji = "🟢" if "0_" in k or "1_" in k else ("🟡" if "2_" in k else "🔴")
+                st.write(f"{emoji} {k.replace('_', ' ')}: {v:.1f}%")
+
+        st.success("""
+        💡 **Como usamos isso na geração de jogos:**
+        - O algoritmo prioriza números dos melhores scores
+        - **MAS** rejeita combinações que criariam 4+ números na mesma linha
+        - **E** rejeita combinações que criariam 3+ números na mesma coluna
+        - Resultado: jogos com boa distribuição pelo volante
+        """)
+
+        st.markdown("---")
+
+        # NOVO: Mapa de Calor do Volante
+        st.subheader("🗺️ Mapa de Calor do Volante (Linhas × Colunas)")
+
+        with st.expander("📖 Como interpretar o Mapa de Calor", expanded=False):
+            st.markdown("""
+            ### 🗺️ Mapa de Calor do Volante
+
+            **O que é:**
+            Este mapa mostra visualmente a frequência de cada número do volante, organizados em uma grade 6×10.
+
+            **Como ler:**
+            - **Verde escuro** = números MUITO frequentes
+            - **Amarelo** = frequência média
+            - **Vermelho** = números POUCO frequentes
+
+            **Cada célula mostra:**
+            - Número da dezena (01-60)
+            - Frequência entre parênteses (quantas vezes apareceu)
+
+            **Cruzamento:**
+            - **Linhas (horizontal):** L1=01-10, L2=11-20, L3=21-30, L4=31-40, L5=41-50, L6=51-60
+            - **Colunas (vertical):** C1=terminados em 1, C2=terminados em 2, ..., C10=terminados em 0
+
+            **Exemplo:**
+            - Posição **L3-C5** = Número **25** (linha 3, coluna 5)
+            - Posição **L6-C10** = Número **60** (linha 6, coluna 10)
+
+            **Para que serve:**
+            - Identificar "pontos quentes" do volante (áreas com números muito sorteados)
+            - Evitar concentração em áreas "frias"
+            - Distribuir melhor suas apostas pelo volante
+            """)
+
+        fig_mapa_calor = criar_mapa_calor_volante(analyzer)
+        st.plotly_chart(fig_mapa_calor, use_container_width=True)
+
+        # Análise complementar
+        st.markdown("### 📊 Insights do Mapa de Calor")
+
+        # Calcular estatísticas do mapa
+        df_temp = analyzer.df
+        matriz_freq = np.zeros((6, 10))
+        for idx, row in df_temp.iterrows():
+            jogo = [row['D1'], row['D2'], row['D3'], row['D4'], row['D5'], row['D6']]
+            for num in jogo:
+                linha = (num - 1) // 10
+                coluna = (num - 1) % 10
+                matriz_freq[linha][coluna] += 1
+
+        # Encontrar posições mais e menos frequentes
+        max_freq = np.max(matriz_freq)
+        min_freq = np.min(matriz_freq)
+        pos_max = np.where(matriz_freq == max_freq)
+        pos_min = np.where(matriz_freq == min_freq)
+
+        num_max = pos_max[0][0] * 10 + pos_max[1][0] + 1
+        num_min = pos_min[0][0] * 10 + pos_min[1][0] + 1
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("🔥 Posição Mais Quente", f"{num_max:02d}", delta=f"{int(max_freq)} vezes")
+
+        with col2:
+            st.metric("❄️ Posição Mais Fria", f"{num_min:02d}", delta=f"{int(min_freq)} vezes")
+
+        with col3:
+            variacao = max_freq - min_freq
+            st.metric("📊 Variação", f"{int(variacao)}", delta="diferença")
+
+        st.info("""
+        💡 **Interpretação:**
+        - Números nas posições "quentes" (verde) aparecem com mais frequência
+        - Isso NÃO significa que vão sair mais no próximo sorteio
+        - Use para diversificar suas apostas e evitar padrões concentrados
+        - Combine números de diferentes regiões do volante (quentes + frios)
+        """)
+
+        st.markdown("---")
+
         # Análise de Ciclos
         st.subheader("🔄 Análise de Ciclos de Renovação Completa")
 
@@ -1028,6 +2053,158 @@ def main():
 
             st.write(f"**Últimos {len(analise_ciclos['ultimos_5_ciclos'])} ciclos:**")
             st.write(", ".join([f"{c:.0f}" for c in analise_ciclos['ultimos_5_ciclos']]))
+
+            st.markdown("---")
+
+            # Status do Ciclo Atual usando o novo método
+            st.subheader("🔄 Status do Ciclo Atual")
+
+            # Usar o novo método obter_ciclo_atual()
+            ciclo_atual = analyzer.obter_ciclo_atual()
+
+            numero_ciclo = ciclo_atual['numero_ciclo']
+            total_ciclos_completos = ciclo_atual['total_ciclos_completos']
+            qtd_aparecidos = ciclo_atual['qtd_aparecidos']
+            qtd_faltantes = ciclo_atual['qtd_faltantes']
+            numeros_faltantes = ciclo_atual['numeros_faltantes']
+            progresso_pct = ciclo_atual['progresso_pct']
+            concurso_inicio = ciclo_atual['concurso_inicio']
+            concurso_atual = ciclo_atual['concurso_atual']
+            concursos_no_ciclo = ciclo_atual['concursos_no_ciclo']
+            media_concursos = ciclo_atual['media_concursos_por_ciclo']
+            estimativa_restante = ciclo_atual['estimativa_concursos_restantes']
+
+            # Header do Ciclo com destaque
+            st.markdown(f"## 🎯 CICLO {numero_ciclo}")
+
+            # Info do Ciclo
+            if concurso_inicio is not None:
+                st.success(f"""
+                📍 **Estamos no Ciclo {numero_ciclo}** (após {total_ciclos_completos} ciclos completos)
+
+                🔢 Concurso **{concurso_inicio}** → **{concurso_atual}** ({concursos_no_ciclo} sorteios)
+
+                ✅ Já saíram **{qtd_aparecidos}/60** números ({progresso_pct:.1f}%)
+
+                ❌ Faltam **{qtd_faltantes}** números para completar este ciclo
+
+                📊 Média histórica: **{media_concursos:.1f}** concursos por ciclo
+
+                ⏳ Estimativa: **~{estimativa_restante}** concursos restantes para completar
+                """)
+            else:
+                st.warning("⚠️ Novo ciclo ainda não iniciado (ciclo anterior acabou de completar)")
+
+            # Estimativa de sorteios faltantes
+            if qtd_faltantes > 0 and analise_ciclos['ciclo_medio'] > 0:
+                sorteios_teoricos_faltantes = int(analise_ciclos['ciclo_medio'] * (qtd_faltantes / 60))
+            else:
+                sorteios_teoricos_faltantes = 0
+
+            # Métricas do ciclo atual
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Números Aparecidos", f"{qtd_aparecidos}/60", delta=f"{progresso_pct:.1f}%")
+
+            with col2:
+                st.metric("Números Faltantes", qtd_faltantes)
+
+            with col3:
+                st.metric("Sorteios no Ciclo", concursos_no_ciclo)
+
+            with col4:
+                if qtd_faltantes == 0:
+                    st.success("✅ CICLO COMPLETO!")
+                elif qtd_faltantes <= 5:
+                    st.warning("⚠️ Quase completo!")
+                elif qtd_faltantes <= 15:
+                    st.info("🔄 Avançando...")
+                else:
+                    st.info(f"🔄 Em progresso")
+
+            # Barra de progresso
+            st.progress(progresso_pct / 100)
+
+            # Mostrar números faltantes
+            if qtd_faltantes > 0:
+                st.markdown("### 🎯 Números que ainda NÃO apareceram no ciclo atual:")
+
+                # Agrupar por dezenas para melhor visualização
+                faltantes_formatados = [f"**{num:02d}**" for num in numeros_faltantes]
+
+                # Dividir em linhas de 10 números
+                linhas_display = []
+                for i in range(0, len(faltantes_formatados), 10):
+                    linhas_display.append(" - ".join(faltantes_formatados[i:i+10]))
+
+                for linha in linhas_display:
+                    st.markdown(linha)
+
+                # Análise dos faltantes com 3 faixas
+                st.markdown("---")
+                st.markdown("### 📊 Perfil dos Números Faltantes:")
+
+                pares_faltantes = sum(1 for n in numeros_faltantes if n % 2 == 0)
+                impares_faltantes = qtd_faltantes - pares_faltantes
+                baixos_faltantes = sum(1 for n in numeros_faltantes if 1 <= n <= 20)
+                medios_faltantes = sum(1 for n in numeros_faltantes if 21 <= n <= 40)
+                altos_faltantes = sum(1 for n in numeros_faltantes if 41 <= n <= 60)
+
+                col1, col2, col3, col4, col5 = st.columns(5)
+
+                with col1:
+                    st.metric("Pares", pares_faltantes)
+                with col2:
+                    st.metric("Ímpares", impares_faltantes)
+                with col3:
+                    st.metric("Baixos (1-20)", baixos_faltantes)
+                with col4:
+                    st.metric("Médios (21-40)", medios_faltantes)
+                with col5:
+                    st.metric("Altos (41-60)", altos_faltantes)
+
+                st.info(f"""
+                💡 **Interpretação:**
+                - Estes **{qtd_faltantes} números** têm maior chance teórica de aparecer nos próximos sorteios
+                - **Ciclo {numero_ciclo}:** {concursos_no_ciclo} sorteios desde o concurso {concurso_inicio}
+                - Baseado na **Lei dos Grandes Números**, todos tendem a aparecer ao longo do tempo
+                - Estimativa: apareçam nos próximos **~{estimativa_restante} sorteios** (baseado na média de {media_concursos:.1f} concursos/ciclo)
+                - **MAS ATENÇÃO:** Cada sorteio é independente! Números "atrasados" não têm garantia de sair
+                """)
+            else:
+                # Ciclo completo - não há números faltantes
+                st.success(f"""
+                🎉 **CICLO COMPLETO!**
+
+                Todos os 60 números apareceram entre os concursos **{concurso_inicio}** e **{concurso_atual}**!
+                Total: **{concursos_no_ciclo} sorteios** para completar o ciclo.
+
+                Um novo ciclo está começando agora!
+                """)
+
+            # Histórico de Ciclos (sempre exibido)
+            st.markdown("---")
+            st.subheader("📅 Histórico de Ciclos Completos")
+
+            todos_ciclos = ciclo_atual.get('todos_ciclos', [])
+            ultimos_ciclos = ciclo_atual.get('ultimos_ciclos', [])
+
+            if todos_ciclos:
+                # Mostrar últimos 5 ciclos por padrão
+                st.markdown(f"**Últimos 5 ciclos (de {len(todos_ciclos)} completos):**")
+                for ciclo_info in reversed(ultimos_ciclos):
+                    st.write(f"**Ciclo {ciclo_info['numero_ciclo']}:** Concurso {ciclo_info['concurso_inicio']} → {ciclo_info['concurso_fim']} ({ciclo_info['tamanho']} sorteios)")
+
+                # Expander para ver todos os ciclos
+                with st.expander(f"📋 Ver todos os {len(todos_ciclos)} ciclos completos", expanded=False):
+                    # Criar DataFrame para exibição
+                    df_ciclos = pd.DataFrame(todos_ciclos)
+                    df_ciclos.columns = ['Ciclo', 'Concurso Início', 'Concurso Fim', 'Duração (sorteios)']
+                    st.dataframe(df_ciclos, use_container_width=True, height=400)
+            else:
+                st.write("Nenhum ciclo completo registrado ainda.")
+
         else:
             st.warning("⚠️ Não há dados suficientes para completar um ciclo de renovação completa (todos os 60 números).")
 
@@ -1042,6 +2219,69 @@ def main():
         Análise detalhada de cada jogo vencedor com todos os padrões estatísticos identificados.
         Use os filtros abaixo para encontrar jogos com características específicas.
         """)
+
+        # Explicação detalhada das métricas
+        with st.expander("📖 O que significa cada métrica?", expanded=False):
+            st.markdown("""
+            ### 📊 Explicação das Métricas de Perfil
+
+            **🔢 SOMA**
+            - É a soma de todos os 6 números sorteados
+            - Exemplo: 05+12+23+34+45+56 = **175**
+            - **Mínimo teórico:** 1+2+3+4+5+6 = 21
+            - **Máximo teórico:** 55+56+57+58+59+60 = 345
+            - **Faixa mais comum:** Entre **150 e 200** (cerca de 60% dos sorteios)
+            - **Por que importa:** Somas muito baixas (<100) ou muito altas (>250) são raras
+
+            ---
+
+            **⚖️ PARES / ÍMPARES**
+            - Quantidade de números pares e ímpares no jogo
+            - Padrão mais comum: **3 Pares + 3 Ímpares** (~32% dos jogos)
+            - Extremos (0P-6I ou 6P-0I) são muito raros (<1%)
+
+            ---
+
+            **📊 BAIXOS (1-30) / ALTOS (31-60)**
+            - Divisão dos números em duas faixas
+            - Padrão mais comum: **3 Baixos + 3 Altos** (~35% dos jogos)
+            - Extremos são raros
+
+            ---
+
+            **📏 GAP (Espaçamento)**
+            - Diferença entre números consecutivos do jogo (ordenado)
+            - Exemplo: 05, 12, 23, 34, 45, 56 → Gaps: 7, 11, 11, 11, 11 → **Gap Médio: 10.2**
+            - **Gap Mínimo:** Menor espaço entre dois números consecutivos
+            - **Gap Máximo:** Maior espaço entre dois números consecutivos
+            - **Por que importa:** Gaps muito pequenos = números concentrados; Gaps grandes = números espalhados
+
+            ---
+
+            **🔗 SEQUÊNCIAS**
+            - Quantidade de números consecutivos no jogo
+            - Exemplo: 05, **06, 07**, 23, 34, 45 → **2 sequências** (06-07)
+            - A maioria dos jogos tem 0-1 sequências
+            - Jogos com 3+ sequências são raros
+
+            ---
+
+            **📍 LINHAS COM NÚMEROS**
+            - Quantas das 6 linhas do volante têm pelo menos 1 número
+            - Volante: L1 (01-10), L2 (11-20), L3 (21-30), L4 (31-40), L5 (41-50), L6 (51-60)
+            - Valor típico: **4-5 linhas** ativas
+            - 6 linhas ativas = números muito distribuídos
+
+            ---
+
+            **🎯 Q1, Q2, Q3, Q4 (Quadrantes)**
+            - Distribuição pelos 4 quadrantes do volante
+            - Q1: Superior Esquerdo (01-05, 11-15, 21-25)
+            - Q2: Superior Direito (06-10, 16-20, 26-30)
+            - Q3: Inferior Esquerdo (31-35, 41-45, 51-55)
+            - Q4: Inferior Direito (36-40, 46-50, 56-60)
+            - Distribuição ideal: ~1.5 números por quadrante
+            """)
 
         # Gerar perfis
         perfis_df = analyzer.criar_perfis_de_jogos()
@@ -1130,239 +2370,316 @@ def main():
                 st.metric("Altos Médio", f"{perfis_filtrados['Altos_31_60'].mean():.1f}")
 
     # ------------------------------------------------------------------------
-    # TAB 5: ESTRATÉGIAS
+    # TAB 5: SUGESTÃO PERSONALIZADA POR BUDGET
     # ------------------------------------------------------------------------
 
     with tab5:
-        st.header("🎯 Comparação de Estratégias")
+        st.header("🎲 Sugestão Personalizada - Otimização Completa do Budget")
 
-        st.info("""
-        Comparamos duas estratégias diferentes de seleção de números baseadas em critérios estatísticos distintos.
+        st.info(f"""
+        💰 **Seu Budget:** R$ {budget:,.2f}
+
+        **Estratégia de Otimização:**
+        - Gastar TODO o seu dinheiro disponível
+        - Combinar diferentes tipos de jogos (grandes + médios + pequenos)
+        - Diversificar estratégias para maximizar cobertura
+        - Aproveitar ao máximo cada centavo investido
         """)
 
         # Calcular scores
         scores_df = analyzer.calcular_todos_scores()
 
-        # Estratégia A: Sniper (Top scores)
-        st.subheader("🎯 Estratégia A: SNIPER (Precisão)")
+        # Otimizar budget completo
+        resultado_otimizacao = otimizar_budget_completo(budget, analyzer, scores_df)
 
-        with st.expander("📖 Como funciona a Estratégia Sniper", expanded=False):
-            st.markdown("""
-            ### 🎯 Estratégia SNIPER
+        if not resultado_otimizacao['jogos']:
+            st.error("Budget insuficiente. Mínimo: R$ 6,00")
+        else:
+            # Calcular probabilidades combinadas e índice de perfeição
+            prob_combinada = calcular_probabilidade_combinada(resultado_otimizacao['jogos'])
+            indice_perf = calcular_indice_perfeicao(resultado_otimizacao['jogos'])
 
-            **Filosofia:** "Atire nos alvos certos com precisão matemática"
+            # Resumo da otimização
+            st.markdown("---")
+            st.subheader("📊 Resumo da Otimização")
 
-            **Critérios:**
-            - Seleciona os números com **MAIOR score final** (Top performers)
-            - Baseado em múltiplos fatores combinados:
-              * Frequência histórica
-              * Atraso (regressão à média)
-              * Tendência recente
-              * Equilíbrio espacial no volante
+            col1, col2, col3, col4 = st.columns(4)
 
-            **Vantagens:**
-            - Baseado em análise estatística profunda
-            - Maximiza probabilidade teórica
-            - Equilibrado e racional
+            with col1:
+                st.metric("Total de Jogos", resultado_otimizacao['total_jogos'])
 
-            **Desvantagens:**
-            - Pode ser muito "óbvio" (muitas pessoas usam)
-            - Menor potencial de premiação exclusiva
+            with col2:
+                st.metric("Total Gasto", f"R$ {resultado_otimizacao['total_gasto']:,.2f}")
+
+            with col3:
+                st.metric("Sobra", f"R$ {resultado_otimizacao['resto']:,.2f}")
+
+            with col4:
+                st.metric("Aproveitamento", f"{resultado_otimizacao['aproveitamento']:.1f}%")
+
+            # Barra de progresso do aproveitamento
+            st.progress(resultado_otimizacao['aproveitamento'] / 100)
+
+            if resultado_otimizacao['aproveitamento'] >= 95:
+                st.success(f"✅ **EXCELENTE!** Você está usando {resultado_otimizacao['aproveitamento']:.1f}% do seu budget!")
+            elif resultado_otimizacao['aproveitamento'] >= 85:
+                st.info(f"👍 **BOM!** Você está usando {resultado_otimizacao['aproveitamento']:.1f}% do seu budget.")
+            else:
+                st.warning(f"⚠️ Aproveitamento de {resultado_otimizacao['aproveitamento']:.1f}%. Considere ajustar seu budget para melhor aproveitamento.")
+
+            # ============================================
+            # PROBABILIDADES COMBINADAS
+            # ============================================
+            st.markdown("---")
+            st.subheader("🎰 Suas Chances Combinadas")
+
+            st.info("""
+            **Como funciona:** Combinando todos os seus jogos, calculamos a probabilidade de você
+            acertar **pelo menos uma vez** a Sena, Quina ou Quadra.
             """)
 
-        estrategia_a = EstrategiaA(analyzer)
-        jogo_a_obj = estrategia_a.gerar_jogo_principal()
-        jogo_a = jogo_a_obj.dezenas[:6]  # Pega apenas 6 números para exibição
+            col_p1, col_p2, col_p3 = st.columns(3)
 
-        st.markdown(f"""
-        <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    padding: 2rem; border-radius: 15px; text-align: center; color: white;'>
-            <h3>Jogo Estratégia A (Sniper)</h3>
-            <h1 style='font-size: 2rem; margin: 1rem 0;'>
-                {' - '.join([f'{d:02d}' for d in sorted(jogo_a)])}
-            </h1>
-        </div>
-        """, unsafe_allow_html=True)
+            with col_p1:
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+                            padding: 1.5rem; border-radius: 15px; text-align: center; color: #333;'>
+                    <h3 style='margin: 0; font-size: 1.2rem;'>🏆 SENA</h3>
+                    <p style='font-size: 2rem; font-weight: bold; margin: 0.5rem 0;'>1 em {:,.0f}</p>
+                    <p style='font-size: 0.9rem; margin: 0;'>{:.6f}%</p>
+                </div>
+                """.format(prob_combinada['chance_sena'], prob_combinada['percentual_sena']), unsafe_allow_html=True)
 
-        exibir_volante_interativo(jogo_a)
+            with col_p2:
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, #C0C0C0 0%, #A0A0A0 100%);
+                            padding: 1.5rem; border-radius: 15px; text-align: center; color: #333;'>
+                    <h3 style='margin: 0; font-size: 1.2rem;'>🥈 QUINA</h3>
+                    <p style='font-size: 2rem; font-weight: bold; margin: 0.5rem 0;'>1 em {:,.0f}</p>
+                    <p style='font-size: 0.9rem; margin: 0;'>{:.4f}%</p>
+                </div>
+                """.format(prob_combinada['chance_quina'], prob_combinada['percentual_quina']), unsafe_allow_html=True)
 
-        st.markdown("---")
+            with col_p3:
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, #CD7F32 0%, #8B4513 100%);
+                            padding: 1.5rem; border-radius: 15px; text-align: center; color: white;'>
+                    <h3 style='margin: 0; font-size: 1.2rem;'>🥉 QUADRA</h3>
+                    <p style='font-size: 2rem; font-weight: bold; margin: 0.5rem 0;'>1 em {:,.0f}</p>
+                    <p style='font-size: 0.9rem; margin: 0;'>{:.2f}%</p>
+                </div>
+                """.format(prob_combinada['chance_quadra'], prob_combinada['percentual_quadra']), unsafe_allow_html=True)
 
-        # Estratégia B: Bomber (Diversificação)
-        st.subheader("💣 Estratégia B: BOMBER (Diversificação)")
+            # ============================================
+            # ÍNDICE DE PERFEIÇÃO
+            # ============================================
+            st.markdown("---")
+            st.subheader("📈 Índice de Perfeição dos Indicadores")
 
-        with st.expander("📖 Como funciona a Estratégia Bomber", expanded=False):
-            st.markdown("""
-            ### 💣 Estratégia BOMBER
-
-            **Filosofia:** "Cubra mais área com diversificação inteligente"
-
-            **Critérios:**
-            - Combina números de **diferentes perfis**:
-              * 40% Top scores (alta probabilidade)
-              * 30% Números atrasados (regressão à média)
-              * 20% Números quentes (momentum)
-              * 10% Zebras (surpresa)
-            - Garante equilíbrio par/ímpar e alto/baixo
-            - Distribui pelos quadrantes do volante
-
-            **Vantagens:**
-            - Maior diversificação
-            - Cobre diferentes cenários estatísticos
-            - Potencial de premiação exclusiva se acertar
-
-            **Desvantagens:**
-            - Menos focado em probabilidade pura
-            - Maior variância nos resultados
+            st.info("""
+            **O que é:** Medimos o quão próximo seus jogos estão do "perfil ideal" baseado nos 12 critérios
+            de análise estatística. Quanto maior, melhor a qualidade dos números selecionados.
             """)
 
-        estrategia_b = EstrategiaB(analyzer)
-        jogo_b_obj = estrategia_b.gerar_jogo_principal()
-        jogo_b = jogo_b_obj.dezenas[:6]  # Pega apenas 6 números para exibição
+            # Gauge visual do índice
+            indice = indice_perf['indice_total']
+            classificacao = indice_perf['classificacao']
 
-        st.markdown(f"""
-        <div style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                    padding: 2rem; border-radius: 15px; text-align: center; color: white;'>
-            <h3>Jogo Estratégia B (Bomber)</h3>
-            <h1 style='font-size: 2rem; margin: 1rem 0;'>
-                {' - '.join([f'{d:02d}' for d in sorted(jogo_b)])}
-            </h1>
-        </div>
-        """, unsafe_allow_html=True)
+            # Cor baseada no índice
+            if indice >= 85:
+                cor_indice = "#00cc44"  # Verde
+                emoji_class = "🌟"
+            elif indice >= 70:
+                cor_indice = "#66bb6a"  # Verde claro
+                emoji_class = "✨"
+            elif indice >= 55:
+                cor_indice = "#ffa726"  # Laranja
+                emoji_class = "👍"
+            else:
+                cor_indice = "#ef5350"  # Vermelho
+                emoji_class = "⚠️"
 
-        exibir_volante_interativo(jogo_b)
+            st.markdown(f"""
+            <div style='background: linear-gradient(135deg, {cor_indice}33 0%, {cor_indice}66 100%);
+                        padding: 2rem; border-radius: 15px; text-align: center; border: 3px solid {cor_indice};'>
+                <h2 style='margin: 0; font-size: 3rem; color: {cor_indice};'>{indice:.1f}%</h2>
+                <p style='font-size: 1.5rem; margin: 0.5rem 0;'>{emoji_class} {classificacao}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.markdown("---")
+            st.progress(indice / 100)
 
-        # Comparação lado a lado
-        st.subheader("⚖️ Comparação Lado a Lado")
+            # Detalhes do índice em expander
+            with st.expander("📊 Ver Detalhes dos Critérios", expanded=False):
+                detalhes = indice_perf['detalhes']
 
-        comparador = ComparadorEstrategias(analyzer)
-        comparacao_result = comparador.comparar()
+                st.markdown("### Pontuação por Critério (máx. 100 cada)")
 
-        col1, col2 = st.columns(2)
+                criterios_data = [
+                    ("Score Médio", detalhes.get('score_medio', {}).get('pontos', 0), f"Valor: {detalhes.get('score_medio', {}).get('valor', 0)}"),
+                    ("Paridade (Par/Ímpar)", detalhes.get('paridade', {}).get('pontos', 0), f"Desvio: {detalhes.get('paridade', {}).get('desvio', '0%')}"),
+                    ("Baixo/Médio/Alto", detalhes.get('baixo_medio_alto', {}).get('pontos', 0), f"Desvio: {detalhes.get('baixo_medio_alto', {}).get('desvio', '0%')}"),
+                    ("Soma Ideal", detalhes.get('soma_ideal', {}).get('pontos', 0), "Faixa 150-200 proporcional"),
+                    ("Cobertura Linhas", detalhes.get('cobertura_linhas', {}).get('pontos', 0), f"Usadas: {detalhes.get('cobertura_linhas', {}).get('usadas', 0)}/6"),
+                    ("Cobertura Colunas", detalhes.get('cobertura_colunas', {}).get('pontos', 0), f"Usadas: {detalhes.get('cobertura_colunas', {}).get('usadas', 0)}/10"),
+                    ("Números do Ciclo", detalhes.get('numeros_ciclo', {}).get('pontos', 0), f"Média: {detalhes.get('numeros_ciclo', {}).get('media', 0)} por jogo"),
+                    ("Diversificação", detalhes.get('diversificacao', {}).get('pontos', 0), f"{detalhes.get('diversificacao', {}).get('unicos', 0)} únicos de {detalhes.get('diversificacao', {}).get('total', 0)} total"),
+                ]
 
-        # Calcular perfis dos jogos
-        equilibrio_a = analyzer.validar_equilibrio_jogo(jogo_a)
-        equilibrio_b = analyzer.validar_equilibrio_jogo(jogo_b)
+                for criterio, pontos, detalhe in criterios_data:
+                    col_a, col_b, col_c = st.columns([3, 2, 3])
+                    with col_a:
+                        st.write(f"**{criterio}**")
+                    with col_b:
+                        if pontos >= 80:
+                            st.success(f"{pontos:.1f}")
+                        elif pontos >= 60:
+                            st.info(f"{pontos:.1f}")
+                        elif pontos >= 40:
+                            st.warning(f"{pontos:.1f}")
+                        else:
+                            st.error(f"{pontos:.1f}")
+                    with col_c:
+                        st.caption(detalhe)
 
-        with col1:
-            st.markdown("### 🎯 Sniper")
-            st.write(f"**Dezenas:** {', '.join([f'{d:02d}' for d in sorted(jogo_a)])}")
-            st.write(f"**Pares/Ímpares:** {equilibrio_a['pares']}P - {equilibrio_a['impares']}I")
-            st.write(f"**Baixos/Altos:** {equilibrio_a['baixos']}B - {equilibrio_a['altos']}A")
-            st.write(f"**Soma Total:** {sum(jogo_a)}")
+            st.markdown("---")
 
-        with col2:
-            st.markdown("### 💣 Bomber")
-            st.write(f"**Dezenas:** {', '.join([f'{d:02d}' for d in sorted(jogo_b)])}")
-            st.write(f"**Pares/Ímpares:** {equilibrio_b['pares']}P - {equilibrio_b['impares']}I")
-            st.write(f"**Baixos/Altos:** {equilibrio_b['baixos']}B - {equilibrio_b['altos']}A")
-            st.write(f"**Soma Total:** {sum(jogo_b)}")
+            # Exibir todos os jogos sugeridos
+            st.subheader(f"🎯 Seus {resultado_otimizacao['total_jogos']} Jogos Otimizados")
 
-        st.success(f"""
-        💡 **Qual escolher?**
+            for i, jogo in enumerate(resultado_otimizacao['jogos'], 1):
+                perfil = jogo.get('perfil', {})
+                dezenas_str = ' - '.join([f'{d:02d}' for d in jogo['dezenas']])
+                titulo_jogo = f"Jogo {i} | {jogo['quantidade_numeros']} num | {dezenas_str} | R$ {jogo['custo']:,.2f}"
+                with st.expander(titulo_jogo, expanded=False):
 
-        - **Sniper:** Se você prefere seguir a matemática pura e maximizar probabilidades teóricas
-        - **Bomber:** Se você prefere diversificar e cobrir diferentes cenários estatísticos
-        - **Ambas:** Jogue as duas e aumente sua cobertura!
-        """)
+                    # Exibir dezenas primeiro (destaque)
+                    dezenas = jogo['dezenas']
+                    st.markdown(f"""
+                    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                padding: 2rem; border-radius: 15px; text-align: center; color: white;'>
+                        <h2 style='font-size: 1.8rem; margin: 0.5rem 0;'>
+                            {' - '.join([f'{d:02d}' for d in dezenas])}
+                        </h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # Volante visual
+                    exibir_volante_interativo(dezenas)
+
+                    st.markdown("---")
+
+                    # Métricas do jogo em 2 linhas
+                    st.markdown("### 📊 Perfil do Jogo")
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric("Dezenas", jogo['quantidade_numeros'])
+                        st.metric("Custo", f"R$ {jogo['custo']:,.2f}")
+
+                    with col2:
+                        pares = perfil.get('pares', sum(1 for d in dezenas if d % 2 == 0))
+                        impares = perfil.get('impares', len(dezenas) - pares)
+                        st.metric("Par/Ímpar", f"{pares}P - {impares}I")
+                        st.metric("Prob. Sena", jogo['prob_sena'])
+
+                    with col3:
+                        baixos = perfil.get('baixos', sum(1 for d in dezenas if 1 <= d <= 20))
+                        medios = perfil.get('medios', sum(1 for d in dezenas if 21 <= d <= 40))
+                        altos = perfil.get('altos', sum(1 for d in dezenas if 41 <= d <= 60))
+                        st.metric("Baixo/Médio/Alto", f"{baixos}B-{medios}M-{altos}A")
+                        st.metric("Soma Total", perfil.get('soma', sum(dezenas)))
+
+                    with col4:
+                        st.metric("Score Médio", f"{perfil.get('score_medio', 0):.1f}")
+                        faltantes = perfil.get('faltantes_ciclo', 0)
+                        st.metric("Núm. do Ciclo", f"{faltantes} incluídos")
+
+                    # Segunda linha de métricas (linhas/colunas)
+                    col5, col6, col7, col8 = st.columns(4)
+                    with col5:
+                        max_lin = perfil.get('max_linha', '-')
+                        linhas_usadas = perfil.get('linhas_usadas', '-')
+                        st.metric("Máx. Mesma Linha", f"{max_lin} (usa {linhas_usadas}/6)")
+                    with col6:
+                        max_col = perfil.get('max_coluna', '-')
+                        colunas_usadas = perfil.get('colunas_usadas', '-')
+                        st.metric("Máx. Mesma Coluna", f"{max_col} (usa {colunas_usadas}/10)")
+                    with col7:
+                        soma_val = perfil.get('soma', sum(dezenas))
+                        soma_status = "✅" if 150 <= soma_val <= 200 else "⚠️"
+                        st.metric("Soma", f"{soma_val} {soma_status}")
+                    with col8:
+                        alertas = perfil.get('alertas_distribuicao', [])
+                        if alertas:
+                            st.warning(" | ".join(alertas))
+                        else:
+                            st.success("✅ Distribuição OK")
+
+                    # Justificativa da estratégia
+                    st.markdown("---")
+                    st.success(f"""
+                    **🎯 Critérios de Seleção Aplicados:**
+
+                    1. ✅ **Ranking de Scores:** Números com melhor pontuação geral (frequência + atraso + tendência + etc.)
+                    2. ✅ **Ciclo Atual:** Prioridade para {faltantes} números que ainda não apareceram no ciclo
+                    3. ✅ **Equilíbrio Par/Ímpar:** {pares} pares e {impares} ímpares (ideal: ~50/50)
+                    4. ✅ **Equilíbrio B/M/A:** {baixos} baixos, {medios} médios, {altos} altos
+                    5. ✅ **Soma:** {perfil.get('soma', sum(dezenas))} (faixa ideal: 150-200 para 6 números)
+                    6. ✅ **Linhas/Colunas:** Máx {perfil.get('max_linha', '?')} na mesma linha, {perfil.get('max_coluna', '?')} na mesma coluna
+                    7. ✅ **Diversificação:** Números diferentes dos outros jogos
+                    """)
+
+                    # Justificativa dos números (apenas para jogos menores - até 10 números)
+                    if len(dezenas) <= 10:
+                        st.markdown("---")
+                        st.markdown("### 🤔 Por que cada número?")
+
+                        justificativas = gerar_justificativa_numeros(dezenas, analyzer, scores_df)
+
+                        for just in justificativas:
+                            with st.expander(f"Número {just['numero']:02d}"):
+                                for razao in just['razoes']:
+                                    st.markdown(f"✅ {razao}")
+
+                    # Comparação com histórico (apenas para jogos simples de 6 números)
+                    if len(dezenas) == 6:
+                        st.markdown("---")
+                        st.markdown("### 📊 Jogos Similares que já Ganharam")
+
+                        jogos_similares = comparar_com_historico(dezenas, analyzer)
+
+                        if jogos_similares:
+                            st.success(f"Encontramos **{len(jogos_similares)} jogos vencedores** com padrão similar!")
+
+                            for jogo_hist in jogos_similares[:5]:  # Top 5
+                                st.write(f"**Concurso {jogo_hist['concurso']}:** {' - '.join([f'{d:02d}' for d in jogo_hist['dezenas']])}")
+                                st.write(f"   ↳ Padrão: {jogo_hist['padrao']}")
+                        else:
+                            st.warning("Padrão único - não encontramos jogos similares no histórico.")
+
+            st.markdown("---")
+            st.success(f"""
+            🎉 **OTIMIZAÇÃO COMPLETA!**
+
+            Você está investindo R$ {resultado_otimizacao['total_gasto']:,.2f} ({resultado_otimizacao['aproveitamento']:.1f}% do budget)
+            em {resultado_otimizacao['total_jogos']} jogos diversificados com diferentes estratégias!
+
+            **Vantagens desta abordagem:**
+            - ✅ Maximiza uso do budget disponível
+            - ✅ Diversifica estratégias (top scores + cold + balanced + median)
+            - ✅ Combina jogos grandes (maior cobertura) + jogos pequenos (maior quantidade)
+            - ✅ Aumenta suas chances cobrindo diferentes cenários estatísticos
+
+            💡 **Lembre-se:** Jogue com responsabilidade e nunca aposte mais do que pode perder!
+            """)
 
     # ------------------------------------------------------------------------
-    # TAB 6: SUGESTÃO PERSONALIZADA POR BUDGET
+    # TAB 6: TABELA DE CUSTOS OFICIAL
     # ------------------------------------------------------------------------
 
     with tab6:
-        st.header("🎲 Sugestão Personalizada para seu Budget")
-
-        st.info(f"💰 **Seu Budget:** R$ {budget:,.2f}")
-
-        # Calcular scores
-        scores_df = analyzer.calcular_todos_scores()
-
-        # Sugerir jogos baseado no budget
-        sugestoes = sugerir_jogos_por_budget(budget, analyzer, scores_df)
-
-        if not sugestoes:
-            st.error("Budget insuficiente. Mínimo: R$ 6,00")
-            return
-
-        st.subheader("📋 Opções Disponíveis para seu Budget")
-
-        for i, sug in enumerate(sugestoes[:3], 1):  # Top 3 opções
-            with st.expander(f"Opção {i}: {sug['qtd_jogos']} jogo(s) de {sug['quantidade_numeros']} números", expanded=(i==1)):
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    st.metric("Custo por Jogo", f"R$ {sug['custo_por_jogo']:,.2f}")
-                    st.metric("Quantidade de Jogos", sug['qtd_jogos'])
-
-                with col2:
-                    st.metric("Custo Total", f"R$ {sug['custo_total']:,.2f}")
-                    st.metric("Sobra", f"R$ {sug['resto']:,.2f}")
-
-                with col3:
-                    st.metric("Prob. Sena", sug['prob_sena'])
-                    st.metric("Prob. Quina", sug['prob_quina'])
-
-                # Gerar jogo sugerido
-                st.markdown("---")
-                st.markdown("### 🎯 Dezenas Sugeridas")
-
-                qtd_dezenas = sug['quantidade_numeros']
-                dezenas_sugeridas = sorted(scores_df.head(qtd_dezenas)['numero'].astype(int).tolist())
-
-                # Exibir dezenas
-                st.markdown(f"""
-                <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                            padding: 2rem; border-radius: 15px; text-align: center; color: white;'>
-                    <h3>Dezenas Selecionadas</h3>
-                    <h1 style='font-size: 2rem; margin: 1rem 0;'>
-                        {' - '.join([f'{d:02d}' for d in dezenas_sugeridas])}
-                    </h1>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Volante visual
-                exibir_volante_interativo(dezenas_sugeridas)
-
-                # Justificativa detalhada
-                st.markdown("---")
-                st.markdown("### 🤔 Por que escolhemos estes números?")
-
-                justificativas = gerar_justificativa_numeros(dezenas_sugeridas, analyzer, scores_df)
-
-                for just in justificativas:
-                    with st.expander(f"Número {just['numero']:02d}"):
-                        for razao in just['razoes']:
-                            st.markdown(f"✅ {razao}")
-
-                # Comparação com histórico
-                st.markdown("---")
-                st.markdown("### 📊 Jogos Similares que já Ganharam")
-
-                jogos_similares = comparar_com_historico(dezenas_sugeridas, analyzer)
-
-                if jogos_similares:
-                    st.success(f"Encontramos **{len(jogos_similares)} jogos vencedores** com padrão similar!")
-
-                    for jogo_hist in jogos_similares[:5]:  # Top 5
-                        st.write(f"**Concurso {jogo_hist['concurso']}:** {' - '.join([f'{d:02d}' for d in jogo_hist['dezenas']])}")
-                        st.write(f"   ↳ Padrão: {jogo_hist['padrao']}")
-                else:
-                    st.warning("Padrão único - não encontramos jogos similares no histórico.")
-
-        st.markdown("---")
-        st.success("""
-        💡 **Dica:** Quanto mais números você joga, maior a probabilidade de acerto,
-        mas também maior o custo. Encontre o equilíbrio ideal para seu budget!
-        """)
-
-    # ------------------------------------------------------------------------
-    # TAB 7: TABELA DE CUSTOS OFICIAL
-    # ------------------------------------------------------------------------
-
-    with tab7:
         st.header("💰 Tabela Oficial de Custos e Probabilidades")
 
         st.info("Tabela oficial da Caixa Econômica Federal com valores e probabilidades por quantidade de números jogados.")
@@ -1400,10 +2717,10 @@ def main():
         """)
 
     # ------------------------------------------------------------------------
-    # TAB 8: DADOS BRUTOS
+    # TAB 7: DADOS BRUTOS
     # ------------------------------------------------------------------------
 
-    with tab8:
+    with tab7:
         st.header("💾 Dados Brutos - Histórico de Sorteios")
 
         st.info("""

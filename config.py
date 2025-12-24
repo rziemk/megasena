@@ -99,14 +99,28 @@ JANELA_HOT = 10           # Últimos N jogos para análise "Hot"
 JANELA_COLD = 50          # Janela para análise "Cold" (atraso)
 CICLO_RENOVACAO = 15      # Ciclo médio de renovação (concursos)
 
-# Pesos para cálculo do Score
-PESO_FREQUENCIA = 0.25
-PESO_ATRASO = 0.20
-PESO_TENDENCIA = 0.15
-PESO_QUADRANTE = 0.15
-PESO_PARIDADE = 0.10
-PESO_ALTO_BAIXO = 0.10
-PESO_POISSON = 0.05
+# Pesos para cálculo do Score (Total = 1.0) - 12 REGRAS
+PESO_FREQUENCIA = 0.14        # Frequência histórica
+PESO_ATRASO = 0.14            # Atraso (regressão à média)
+PESO_TENDENCIA = 0.09         # Tendência recente
+PESO_QUADRANTE = 0.09         # Equilíbrio por quadrante
+PESO_PARIDADE = 0.07          # Contribuição par/ímpar
+PESO_BAIXO_MEDIO_ALTO = 0.07  # Contribuição Baixo/Médio/Alto (3 faixas)
+PESO_LINHAS = 0.07            # Distribuição por linhas do volante
+PESO_COLUNAS = 0.07           # Distribuição por colunas do volante
+PESO_SOMA = 0.07              # Contribuição para soma ideal (150-200)
+PESO_CICLO = 0.05             # Números faltantes no ciclo atual
+PESO_POISSON = 0.05           # Probabilidade Poisson
+PESO_FREQUENCIA_HNF = 0.09    # Faixas de Frequência H-N-F (Quente/Neutro/Frio)
+
+# Faixa ideal de Soma (onde ~60% dos sorteios caem)
+SOMA_IDEAL_MIN = 150
+SOMA_IDEAL_MAX = 200
+SOMA_IDEAL_MEDIA = 175        # Soma média esperada para 6 números
+
+# Limites para classificação Baixo/Médio/Alto (3 faixas)
+LIMITE_BAIXO = 20    # 1-20 = Baixo
+LIMITE_MEDIO = 40    # 21-40 = Médio, 41-60 = Alto
 
 # =============================================================================
 # CONFIGURAÇÕES DE ESTRATÉGIAS

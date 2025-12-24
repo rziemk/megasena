@@ -16,10 +16,14 @@ warnings.filterwarnings('ignore')
 
 from config import (
     TOTAL_NUMEROS, NUMEROS_SORTEADOS, LIMITE_ALTO_BAIXO,
+    LIMITE_BAIXO, LIMITE_MEDIO,
     VOLANTE_LINHAS, VOLANTE_COLUNAS,
     JANELA_HOT, JANELA_COLD, CICLO_RENOVACAO,
     PESO_FREQUENCIA, PESO_ATRASO, PESO_TENDENCIA,
-    PESO_QUADRANTE, PESO_PARIDADE, PESO_ALTO_BAIXO, PESO_POISSON
+    PESO_QUADRANTE, PESO_PARIDADE, PESO_BAIXO_MEDIO_ALTO,
+    PESO_LINHAS, PESO_COLUNAS, PESO_SOMA, PESO_CICLO, PESO_POISSON,
+    PESO_FREQUENCIA_HNF,
+    SOMA_IDEAL_MIN, SOMA_IDEAL_MAX, SOMA_IDEAL_MEDIA
 )
 
 
@@ -273,6 +277,143 @@ class MegaSenaAnalyzer:
 
         return {padrao: count / total * 100 for padrao, count in contagem.most_common()}
 
+    def analisar_padrao_linhas_jogo(self) -> Dict[str, any]:
+        """
+        Analisa quantos números por linha aparecem nos jogos históricos.
+        Ex: '2-1-1-1-1-0' = 2 números na L1, 1 na L2, 1 na L3, 1 na L4, 1 na L5, 0 na L6
+
+        Identifica padrões raros (ex: 4+ números na mesma linha) que devem ser evitados.
+        """
+        padroes = []
+        max_por_linha_historico = []
+
+        for _, row in self.df.iterrows():
+            dezenas = [row[col] for col in self.colunas_dezenas]
+            contagem_linhas = [0] * 6  # 6 linhas
+
+            for d in dezenas:
+                linha = (d - 1) // 10  # 0-5
+                contagem_linhas[linha] += 1
+
+            # Ordenar para criar padrão normalizado
+            padrao = '-'.join(map(str, sorted(contagem_linhas, reverse=True)))
+            padroes.append(padrao)
+            max_por_linha_historico.append(max(contagem_linhas))
+
+        contagem = Counter(padroes)
+        total = len(padroes)
+
+        # Estatísticas sobre máximo por linha
+        max_counts = Counter(max_por_linha_historico)
+
+        return {
+            'padroes_frequentes': {p: c/total*100 for p, c in contagem.most_common(10)},
+            'max_numeros_mesma_linha': {
+                f'{k}_numeros': v/total*100 for k, v in sorted(max_counts.items())
+            },
+            'media_max_por_linha': np.mean(max_por_linha_historico),
+            'evitar_4_ou_mais_mesma_linha': max_counts.get(4, 0)/total*100 + max_counts.get(5, 0)/total*100 + max_counts.get(6, 0)/total*100
+        }
+
+    def analisar_padrao_colunas_jogo(self) -> Dict[str, any]:
+        """
+        Analisa quantos números por coluna aparecem nos jogos históricos.
+        Identifica padrões raros (ex: 3+ números na mesma coluna) que devem ser evitados.
+        """
+        padroes = []
+        max_por_coluna_historico = []
+
+        for _, row in self.df.iterrows():
+            dezenas = [row[col] for col in self.colunas_dezenas]
+            contagem_colunas = [0] * 10  # 10 colunas
+
+            for d in dezenas:
+                coluna = (d - 1) % 10  # 0-9
+                contagem_colunas[coluna] += 1
+
+            # Ordenar para criar padrão normalizado
+            padrao = '-'.join(map(str, sorted(contagem_colunas, reverse=True)))
+            padroes.append(padrao)
+            max_por_coluna_historico.append(max(contagem_colunas))
+
+        contagem = Counter(padroes)
+        total = len(padroes)
+
+        # Estatísticas sobre máximo por coluna
+        max_counts = Counter(max_por_coluna_historico)
+
+        return {
+            'padroes_frequentes': {p: c/total*100 for p, c in contagem.most_common(10)},
+            'max_numeros_mesma_coluna': {
+                f'{k}_numeros': v/total*100 for k, v in sorted(max_counts.items())
+            },
+            'media_max_por_coluna': np.mean(max_por_coluna_historico),
+            'evitar_3_ou_mais_mesma_coluna': max_counts.get(3, 0)/total*100 + max_counts.get(4, 0)/total*100 + max_counts.get(5, 0)/total*100 + max_counts.get(6, 0)/total*100
+        }
+
+    def validar_distribuicao_jogo(self, dezenas: List[int]) -> Dict[str, any]:
+        """
+        Valida se um jogo proposto tem distribuição aceitável de linhas/colunas.
+
+        Returns:
+            Dict com validações e alertas
+        """
+        # Contagem por linha
+        contagem_linhas = [0] * 6
+        for d in dezenas:
+            linha = (d - 1) // 10
+            contagem_linhas[linha] += 1
+
+        # Contagem por coluna
+        contagem_colunas = [0] * 10
+        for d in dezenas:
+            coluna = (d - 1) % 10
+            contagem_colunas[coluna] += 1
+
+        max_linha = max(contagem_linhas)
+        max_coluna = max(contagem_colunas)
+
+        # Análise histórica para comparação
+        padrao_linhas = self.analisar_padrao_linhas_jogo()
+        padrao_colunas = self.analisar_padrao_colunas_jogo()
+
+        alertas = []
+        score_distribuicao = 100
+
+        # Verificar concentração em linhas
+        if max_linha >= 4:
+            alertas.append(f"⚠️ {max_linha} números na mesma linha (raro: {padrao_linhas['evitar_4_ou_mais_mesma_linha']:.1f}% histórico)")
+            score_distribuicao -= 30
+        elif max_linha == 3:
+            alertas.append(f"⚡ 3 números em uma linha (comum mas não ideal)")
+            score_distribuicao -= 10
+
+        # Verificar concentração em colunas
+        if max_coluna >= 3:
+            alertas.append(f"⚠️ {max_coluna} números na mesma coluna (raro: {padrao_colunas['evitar_3_ou_mais_mesma_coluna']:.1f}% histórico)")
+            score_distribuicao -= 25
+        elif max_coluna == 2:
+            # 2 na mesma coluna é comum, ok
+            pass
+
+        # Verificar linhas vazias demais
+        linhas_vazias = contagem_linhas.count(0)
+        if linhas_vazias >= 3:
+            alertas.append(f"⚡ {linhas_vazias} linhas vazias (pouca dispersão)")
+            score_distribuicao -= 15
+
+        return {
+            'contagem_linhas': contagem_linhas,
+            'contagem_colunas': contagem_colunas,
+            'max_linha': max_linha,
+            'max_coluna': max_coluna,
+            'linhas_usadas': 6 - linhas_vazias,
+            'colunas_usadas': 10 - contagem_colunas.count(0),
+            'alertas': alertas,
+            'score_distribuicao': max(0, score_distribuicao),
+            'distribuicao_ok': len(alertas) == 0
+        }
+
     # =========================================================================
     # LEI DOS GRANDES NÚMEROS E CICLOS
     # =========================================================================
@@ -375,6 +516,223 @@ class MegaSenaAnalyzer:
         return tendencia
 
     # =========================================================================
+    # ANÁLISE DE FAIXAS DE FREQUÊNCIA (QUENTE/NEUTRO/FRIO) - 12ª REGRA
+    # =========================================================================
+
+    def classificar_numeros_por_frequencia(self) -> Dict[str, List[int]]:
+        """
+        Classifica os 60 números em 3 faixas baseado na frequência histórica:
+        - Quente (Hot): Top 20 números mais frequentes
+        - Neutro: 20 números do meio
+        - Frio (Cold): 20 números menos frequentes
+
+        Returns:
+            Dict com listas de números em cada faixa
+        """
+        freq = self.calcular_frequencias()
+
+        # Ordena por frequência (maior para menor)
+        numeros_ordenados = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+
+        # Divide em 3 faixas de 20 números cada
+        quentes = [num for num, _ in numeros_ordenados[:20]]
+        neutros = [num for num, _ in numeros_ordenados[20:40]]
+        frios = [num for num, _ in numeros_ordenados[40:]]
+
+        return {
+            'quente': sorted(quentes),
+            'neutro': sorted(neutros),
+            'frio': sorted(frios),
+            'ranking': {num: idx + 1 for idx, (num, _) in enumerate(numeros_ordenados)}
+        }
+
+    def get_faixa_frequencia(self, num: int) -> str:
+        """
+        Retorna a faixa de frequência de um número específico.
+
+        Args:
+            num: Número de 1 a 60
+
+        Returns:
+            'H' (Hot/Quente), 'N' (Neutro), ou 'F' (Frio/Cold)
+        """
+        classificacao = self.classificar_numeros_por_frequencia()
+
+        if num in classificacao['quente']:
+            return 'H'
+        elif num in classificacao['neutro']:
+            return 'N'
+        else:
+            return 'F'
+
+    def analisar_padroes_hnf(self) -> Dict[str, any]:
+        """
+        Analisa padrões de combinação Hot-Neutro-Frio nos sorteios históricos.
+
+        Padrões como:
+        - 2H-2N-2F: 2 quentes, 2 neutros, 2 frios (equilibrado)
+        - 3H-2N-1F: 3 quentes, 2 neutros, 1 frio
+        - etc.
+
+        Returns:
+            Dict com estatísticas dos padrões mais comuns
+        """
+        classificacao = self.classificar_numeros_por_frequencia()
+        quentes_set = set(classificacao['quente'])
+        neutros_set = set(classificacao['neutro'])
+        frios_set = set(classificacao['frio'])
+
+        padroes = Counter()
+        distribuicoes = []
+
+        for _, row in self.df.iterrows():
+            dezenas = [row[col] for col in self.colunas_dezenas]
+
+            h = sum(1 for d in dezenas if d in quentes_set)
+            n = sum(1 for d in dezenas if d in neutros_set)
+            f = sum(1 for d in dezenas if d in frios_set)
+
+            padrao = f"{h}H-{n}N-{f}F"
+            padroes[padrao] += 1
+            distribuicoes.append({'H': h, 'N': n, 'F': f})
+
+        total = len(self.df)
+
+        # Estatísticas detalhadas
+        resultado = {
+            'padroes_frequentes': {
+                padrao: {
+                    'contagem': count,
+                    'percentual': round(count / total * 100, 2)
+                }
+                for padrao, count in padroes.most_common()
+            },
+            'top_5_padroes': [
+                (padrao, round(count / total * 100, 2))
+                for padrao, count in padroes.most_common(5)
+            ],
+            'media_quentes': np.mean([d['H'] for d in distribuicoes]),
+            'media_neutros': np.mean([d['N'] for d in distribuicoes]),
+            'media_frios': np.mean([d['F'] for d in distribuicoes]),
+            'padrao_ideal': '2H-2N-2F',  # Padrão mais equilibrado
+            'total_sorteios': total,
+        }
+
+        # Identifica os padrões mais comuns (que somam ~70% dos sorteios)
+        acumulado = 0
+        padroes_comuns = []
+        for padrao, count in padroes.most_common():
+            pct = count / total * 100
+            acumulado += pct
+            padroes_comuns.append(padrao)
+            if acumulado >= 70:
+                break
+
+        resultado['padroes_recomendados'] = padroes_comuns
+        resultado['cobertura_recomendados'] = round(acumulado, 2)
+
+        return resultado
+
+    def calcular_score_hnf(self, num: int) -> float:
+        """
+        Calcula o score de um número baseado nos padrões H-N-F mais comuns.
+
+        Números que contribuem para padrões mais frequentes ganham mais pontos.
+
+        Args:
+            num: Número de 1 a 60
+
+        Returns:
+            Score de 0 a 100
+        """
+        faixa = self.get_faixa_frequencia(num)
+        padroes = self.analisar_padroes_hnf()
+
+        # Baseado na média histórica de cada faixa
+        # Se a média de quentes é 2.0, números quentes são importantes
+        # para atingir esse equilíbrio
+
+        media_h = padroes['media_quentes']
+        media_n = padroes['media_neutros']
+        media_f = padroes['media_frios']
+
+        # Score baseado em quanto cada faixa contribui para o equilíbrio
+        # Padrão ideal seria 2-2-2, então avaliamos o quão próximo estamos
+
+        if faixa == 'H':
+            # Quentes: se média histórica é ~2, então são importantes
+            # Score proporcional à presença histórica
+            score = min(100, (media_h / 2) * 50 + 50)
+        elif faixa == 'N':
+            # Neutros: geralmente ~2 também
+            score = min(100, (media_n / 2) * 50 + 50)
+        else:  # 'F'
+            # Frios: também ~2
+            score = min(100, (media_f / 2) * 50 + 50)
+
+        # Bônus para números em faixas que aparecem nos padrões mais comuns
+        # Os padrões mais comuns geralmente têm distribuição próxima de 2-2-2
+        top_padrao = padroes['top_5_padroes'][0] if padroes['top_5_padroes'] else ('2H-2N-2F', 20)
+        padrao_str, percentual = top_padrao
+
+        # Extrai quantos de cada faixa no padrão mais comum
+        import re
+        match = re.match(r'(\d+)H-(\d+)N-(\d+)F', padrao_str)
+        if match:
+            h_ideal = int(match.group(1))
+            n_ideal = int(match.group(2))
+            f_ideal = int(match.group(3))
+
+            # Ajusta score baseado no padrão mais comum
+            if faixa == 'H' and h_ideal >= 2:
+                score += 10
+            elif faixa == 'N' and n_ideal >= 2:
+                score += 10
+            elif faixa == 'F' and f_ideal >= 2:
+                score += 10
+
+        return min(100, max(0, score))
+
+    def validar_equilibrio_hnf(self, dezenas: List[int]) -> Dict[str, any]:
+        """
+        Valida se um jogo tem bom equilíbrio de números Quentes/Neutros/Frios.
+
+        Args:
+            dezenas: Lista de números do jogo
+
+        Returns:
+            Dict com análise do equilíbrio H-N-F
+        """
+        classificacao = self.classificar_numeros_por_frequencia()
+        quentes_set = set(classificacao['quente'])
+        neutros_set = set(classificacao['neutro'])
+        frios_set = set(classificacao['frio'])
+
+        h = sum(1 for d in dezenas if d in quentes_set)
+        n = sum(1 for d in dezenas if d in neutros_set)
+        f = sum(1 for d in dezenas if d in frios_set)
+
+        padrao = f"{h}H-{n}N-{f}F"
+        padroes = self.analisar_padroes_hnf()
+
+        # Verifica se o padrão está entre os recomendados
+        recomendado = padrao in padroes['padroes_recomendados']
+        percentual_historico = padroes['padroes_frequentes'].get(padrao, {}).get('percentual', 0)
+
+        return {
+            'padrao': padrao,
+            'quentes': h,
+            'neutros': n,
+            'frios': f,
+            'numeros_quentes': [d for d in dezenas if d in quentes_set],
+            'numeros_neutros': [d for d in dezenas if d in neutros_set],
+            'numeros_frios': [d for d in dezenas if d in frios_set],
+            'padrao_recomendado': recomendado,
+            'percentual_historico': percentual_historico,
+            'score_equilibrio': 100 if recomendado else max(0, 50 - abs(h-2)*15 - abs(n-2)*15 - abs(f-2)*15)
+        }
+
+    # =========================================================================
     # CÁLCULO DO SCORE FINAL (0-100)
     # =========================================================================
 
@@ -382,55 +740,125 @@ class MegaSenaAnalyzer:
         """
         Calcula score composto (0-100) para um número específico.
 
-        Combina múltiplos fatores com pesos configuráveis.
+        Combina múltiplos fatores com pesos configuráveis (Total = 100%):
+        - Frequência histórica (14%)
+        - Atraso/Regressão à média (14%)
+        - Tendência recente (9%)
+        - Equilíbrio por quadrante (9%)
+        - Paridade par/ímpar (7%)
+        - Baixo/Médio/Alto - 3 faixas (7%)
+        - Distribuição por linhas (7%)
+        - Distribuição por colunas (7%)
+        - Contribuição para Soma ideal (7%)
+        - Ciclo atual - números faltantes (5%)
+        - Probabilidade Poisson (5%)
+        - Faixas H-N-F (Quente/Neutro/Frio) (9%) - NOVA REGRA
         """
-        # 1. Score de Frequência (normalizado)
+        # 1. Score de Frequência (normalizado) - 15%
         freq = self.calcular_frequencias()
         freq_min = min(freq.values())
         freq_max = max(freq.values())
         score_freq = ((freq[num] - freq_min) / (freq_max - freq_min)) * 100 if freq_max > freq_min else 50
 
-        # 2. Score de Atraso (números atrasados ganham pontos)
+        # 2. Score de Atraso (números atrasados ganham pontos) - 15%
         atrasos = self.calcular_cold_numbers()
         atraso_max = max(atrasos.values())
         atraso_min = min(atrasos.values())
         score_atraso = ((atrasos[num] - atraso_min) / (atraso_max - atraso_min)) * 100 if atraso_max > atraso_min else 50
 
-        # 3. Score de Tendência
+        # 3. Score de Tendência - 10%
         tendencia = self.calcular_tendencia(num)
-        # Normaliza tendência para 0-100
         score_tendencia = 50 + (tendencia * 500)  # Ajuste empírico
         score_tendencia = max(0, min(100, score_tendencia))
 
-        # 4. Score de Quadrante (baseado em equilíbrio)
+        # 4. Score de Quadrante (baseado em equilíbrio) - 10%
         quadrantes = self.analisar_quadrantes()
+        score_quadrante = 50  # Default
         for q, data in quadrantes.items():
             if num in data['numeros']:
                 desvio = abs(data['media_aparicoes'] - data['distribuicao_ideal'])
-                score_quadrante = 100 - (desvio * 30)  # Penaliza desvios
+                score_quadrante = 100 - (desvio * 30)
                 break
         score_quadrante = max(0, min(100, score_quadrante))
 
-        # 5. Score de Paridade (números que contribuem para equilíbrio)
+        # 5. Score de Paridade (números que contribuem para equilíbrio) - 8%
         paridade = self.analisar_paridade()
-        # 3P-3I é o mais comum/equilibrado
-        if num % 2 == 0:
-            score_paridade = 50 + (paridade.get('3P-3I', 0) - 30)
-        else:
-            score_paridade = 50 + (paridade.get('3P-3I', 0) - 30)
+        score_paridade = 50 + (paridade.get('3P-3I', 0) - 30)
         score_paridade = max(0, min(100, score_paridade))
 
-        # 6. Score Alto/Baixo
-        alto_baixo = self.analisar_alto_baixo()
-        if num <= LIMITE_ALTO_BAIXO:
-            score_alto_baixo = 50 + (alto_baixo.get('3B-3A', 0) - 30)
+        # 6. Score Baixo/Médio/Alto (3 faixas) - 8%
+        bma = self.analisar_baixo_medio_alto()
+        # Padrão mais equilibrado é 2B-2M-2A
+        if 1 <= num <= LIMITE_BAIXO:
+            faixa = 'baixo'
+        elif LIMITE_BAIXO < num <= LIMITE_MEDIO:
+            faixa = 'medio'
         else:
-            score_alto_baixo = 50 + (alto_baixo.get('3B-3A', 0) - 30)
-        score_alto_baixo = max(0, min(100, score_alto_baixo))
+            faixa = 'alto'
+        # Score baseado no quanto o padrão 2-2-2 é comum
+        score_bma = 50 + (bma.get('2B-2M-2A', 0) - 15)
+        score_bma = max(0, min(100, score_bma))
 
-        # 7. Score Poisson
+        # 7. Score de Linhas do Volante - 8%
+        analise_linhas = self.analisar_linhas_volante()
+        linha_num = (num - 1) // 10  # 0-5
+        linha_key = f'L{linha_num + 1}'
+        media_linha = analise_linhas['medias_por_linha'].get(linha_key, 1.0)
+        # Linhas próximas da média ideal (1.0) ganham mais pontos
+        desvio_linha = abs(media_linha - 1.0)
+        score_linhas = 100 - (desvio_linha * 50)
+        score_linhas = max(0, min(100, score_linhas))
+
+        # 8. Score de Colunas do Volante - 8%
+        analise_colunas = self.analisar_colunas_volante()
+        coluna_num = (num - 1) % 10  # 0-9
+        coluna_key = f'C{coluna_num + 1}'
+        media_coluna = analise_colunas['medias_por_coluna'].get(coluna_key, 0.6)
+        # Colunas próximas da média ideal (0.6) ganham mais pontos
+        desvio_coluna = abs(media_coluna - 0.6)
+        score_colunas = 100 - (desvio_coluna * 80)
+        score_colunas = max(0, min(100, score_colunas))
+
+        # 9. Score de Soma (contribuição para soma ideal 150-200) - 8%
+        # Números que contribuem para uma soma na faixa ideal ganham mais pontos
+        # Soma ideal média para 6 números = 175, cada número deveria contribuir ~29
+        contribuicao_ideal = SOMA_IDEAL_MEDIA / 6  # ~29.17
+        desvio_soma = abs(num - contribuicao_ideal)
+        # Números próximos de 29 (contribuição ideal) ganham mais pontos
+        # Números muito baixos (1-10) ou muito altos (50-60) ganham menos
+        if SOMA_IDEAL_MIN / 6 <= num <= SOMA_IDEAL_MAX / 6:
+            # Número está na faixa ideal de contribuição
+            score_soma = 100
+        else:
+            # Penaliza proporcionalmente ao desvio da faixa ideal
+            score_soma = max(0, 100 - (desvio_soma * 3))
+        score_soma = max(0, min(100, score_soma))
+
+        # 10. Score de Ciclo (números faltantes no ciclo atual ganham pontos) - 5%
+        ciclo_atual = self.obter_ciclo_atual()
+        if num in ciclo_atual['numeros_faltantes']:
+            # Número está faltando no ciclo - bônus!
+            # Quanto menos números faltam, maior o bônus
+            qtd_faltantes = ciclo_atual['qtd_faltantes']
+            if qtd_faltantes <= 10:
+                score_ciclo = 100  # Muito poucos faltando, urgente!
+            elif qtd_faltantes <= 20:
+                score_ciclo = 80
+            elif qtd_faltantes <= 30:
+                score_ciclo = 60
+            else:
+                score_ciclo = 40
+        else:
+            # Número já apareceu no ciclo atual
+            score_ciclo = 20
+        score_ciclo = max(0, min(100, score_ciclo))
+
+        # 11. Score Poisson - 5%
         prob_poisson = self.calcular_probabilidade_poisson(num)
         score_poisson = prob_poisson * 100
+
+        # 12. Score H-N-F (Quente/Neutro/Frio) - 9% - NOVA REGRA
+        score_hnf = self.calcular_score_hnf(num)
 
         # Score Final Ponderado
         score_final = (
@@ -439,8 +867,13 @@ class MegaSenaAnalyzer:
             PESO_TENDENCIA * score_tendencia +
             PESO_QUADRANTE * score_quadrante +
             PESO_PARIDADE * score_paridade +
-            PESO_ALTO_BAIXO * score_alto_baixo +
-            PESO_POISSON * score_poisson
+            PESO_BAIXO_MEDIO_ALTO * score_bma +
+            PESO_LINHAS * score_linhas +
+            PESO_COLUNAS * score_colunas +
+            PESO_SOMA * score_soma +
+            PESO_CICLO * score_ciclo +
+            PESO_POISSON * score_poisson +
+            PESO_FREQUENCIA_HNF * score_hnf
         )
 
         return {
@@ -451,8 +884,14 @@ class MegaSenaAnalyzer:
             'score_tendencia': round(score_tendencia, 2),
             'score_quadrante': round(score_quadrante, 2),
             'score_paridade': round(score_paridade, 2),
-            'score_alto_baixo': round(score_alto_baixo, 2),
+            'score_bma': round(score_bma, 2),
+            'score_linhas': round(score_linhas, 2),
+            'score_colunas': round(score_colunas, 2),
+            'score_soma': round(score_soma, 2),
+            'score_ciclo': round(score_ciclo, 2),
             'score_poisson': round(score_poisson, 2),
+            'score_hnf': round(score_hnf, 2),
+            'faixa_hnf': self.get_faixa_frequencia(num),
         }
 
     def calcular_todos_scores(self) -> pd.DataFrame:
@@ -626,13 +1065,16 @@ class MegaSenaAnalyzer:
         Returns:
             Estatísticas de ciclos de renovação completa
         """
-        todos_concursos = []
+        # IMPORTANTE: Ordenar por Concurso para garantir ordem cronológica
+        df_ordenado = self.df.sort_values('Concurso').reset_index(drop=True)
+
         numeros_vistos = set()
         inicio_ciclo = 0
         ciclos = []
         aparicoes_por_ciclo = []
+        ciclos_info = []  # Guarda info detalhada de cada ciclo
 
-        for idx, row in self.df.iterrows():
+        for idx, row in df_ordenado.iterrows():
             dezenas = row[self.colunas_dezenas].values
             numeros_vistos.update(dezenas)
 
@@ -642,12 +1084,21 @@ class MegaSenaAnalyzer:
                 ciclos.append(tamanho_ciclo)
 
                 # Conta aparições de cada número neste ciclo
-                ciclo_df = self.df.iloc[inicio_ciclo:idx+1]
+                ciclo_df = df_ordenado.iloc[inicio_ciclo:idx+1]
                 freq_ciclo = Counter()
                 for _, r in ciclo_df.iterrows():
                     freq_ciclo.update(r[self.colunas_dezenas].values)
 
                 aparicoes_por_ciclo.append(dict(freq_ciclo))
+
+                # Info detalhada do ciclo
+                concurso_inicio = df_ordenado.iloc[inicio_ciclo]['Concurso']
+                concurso_fim = row['Concurso']
+                ciclos_info.append({
+                    'concurso_inicio': concurso_inicio,
+                    'concurso_fim': concurso_fim,
+                    'tamanho': tamanho_ciclo
+                })
 
                 # Reinicia
                 numeros_vistos = set()
@@ -660,6 +1111,7 @@ class MegaSenaAnalyzer:
                 'ciclo_maximo': 0,
                 'total_ciclos_completos': 0,
                 'media_aparicoes_por_numero_no_ciclo': {},
+                'ciclos_info': [],
             }
 
         # Calcula médias de aparições por número
@@ -675,12 +1127,109 @@ class MegaSenaAnalyzer:
             'ciclo_desvio': np.std(ciclos),
             'total_ciclos_completos': len(ciclos),
             'ultimos_5_ciclos': ciclos[-5:] if len(ciclos) >= 5 else ciclos,
+            'ciclos_info': ciclos_info[-5:] if len(ciclos_info) >= 5 else ciclos_info,
             'media_aparicoes_por_numero_no_ciclo': media_aparicoes,
             'numeros_mais_frequentes_no_ciclo': sorted(
                 media_aparicoes.items(),
                 key=lambda x: x[1],
                 reverse=True
             )[:10],
+        }
+
+    def obter_ciclo_atual(self) -> Dict[str, any]:
+        """
+        Obtém informações sobre o ciclo atual em andamento.
+
+        Percorre do PRIMEIRO concurso em diante, mapeando todos os ciclos:
+        - Ciclo 1: concurso X até concurso Y (quando todos 60 números apareceram)
+        - Ciclo 2: concurso Y+1 até concurso Z
+        - ...
+        - Ciclo Atual: concurso W até agora (em andamento, ainda não completou)
+
+        Returns:
+            Dict com info do ciclo atual em andamento
+        """
+        # IMPORTANTE: Ordenar por Concurso para garantir ordem cronológica
+        df_ordenado = self.df.sort_values('Concurso').reset_index(drop=True)
+
+        todos_numeros = set(range(1, 61))
+        numeros_vistos = set()
+        inicio_ciclo_idx = 0
+        numero_ciclo = 1
+        ciclos_completos = []
+
+        # Percorre do primeiro ao último concurso mapeando os ciclos
+        for idx, row in df_ordenado.iterrows():
+            dezenas = row[self.colunas_dezenas].values
+            numeros_vistos.update(dezenas)
+
+            # Se completou um ciclo (viu todos os 60 números)
+            if len(numeros_vistos) == 60:
+                concurso_inicio = df_ordenado.iloc[inicio_ciclo_idx]['Concurso']
+                concurso_fim = row['Concurso']
+                tamanho = idx - inicio_ciclo_idx + 1
+
+                ciclos_completos.append({
+                    'numero_ciclo': numero_ciclo,
+                    'concurso_inicio': concurso_inicio,
+                    'concurso_fim': concurso_fim,
+                    'tamanho': tamanho
+                })
+
+                # Reinicia para próximo ciclo
+                numeros_vistos = set()
+                inicio_ciclo_idx = idx + 1
+                numero_ciclo += 1
+
+        # O ciclo atual é o que está em andamento (após o último ciclo completo)
+        ciclo_atual_numero = numero_ciclo
+        numeros_aparecidos_ciclo_atual = set()
+        concurso_inicio_ciclo_atual = None
+        concursos_no_ciclo_atual = 0
+
+        if inicio_ciclo_idx < len(df_ordenado):
+            # Há um ciclo em andamento
+            ciclo_atual_df = df_ordenado.iloc[inicio_ciclo_idx:]
+            concurso_inicio_ciclo_atual = ciclo_atual_df.iloc[0]['Concurso']
+            concursos_no_ciclo_atual = len(ciclo_atual_df)
+
+            for _, row in ciclo_atual_df.iterrows():
+                dezenas = row[self.colunas_dezenas].values
+                numeros_aparecidos_ciclo_atual.update(dezenas)
+
+        numeros_faltantes = sorted(todos_numeros - numeros_aparecidos_ciclo_atual)
+        ultimo_concurso = df_ordenado.iloc[-1]['Concurso'] if len(df_ordenado) > 0 else None
+
+        # Calcular média de concursos por ciclo para estimativa
+        if ciclos_completos:
+            media_concursos_por_ciclo = np.mean([c['tamanho'] for c in ciclos_completos])
+        else:
+            media_concursos_por_ciclo = 15  # Valor teórico aproximado
+
+        # Estimativa de concursos restantes
+        qtd_faltantes = len(numeros_faltantes)
+        if qtd_faltantes > 0:
+            # Proporção: se faltam X números de 60, faltam aproximadamente X/60 do ciclo
+            estimativa_restante = int(media_concursos_por_ciclo * (qtd_faltantes / 60))
+        else:
+            estimativa_restante = 0
+
+        return {
+            'numero_ciclo': ciclo_atual_numero,
+            'total_ciclos_completos': len(ciclos_completos),
+            'concurso_inicio': concurso_inicio_ciclo_atual,
+            'concurso_atual': ultimo_concurso,
+            'concursos_no_ciclo': concursos_no_ciclo_atual,
+            'numeros_aparecidos': sorted(numeros_aparecidos_ciclo_atual),
+            'numeros_faltantes': numeros_faltantes,
+            'qtd_aparecidos': len(numeros_aparecidos_ciclo_atual),
+            'qtd_faltantes': qtd_faltantes,
+            'progresso_pct': (len(numeros_aparecidos_ciclo_atual) / 60) * 100,
+            'ciclo_completo': qtd_faltantes == 0,
+            'media_concursos_por_ciclo': media_concursos_por_ciclo,
+            'estimativa_concursos_restantes': estimativa_restante,
+            'ultimos_ciclos': ciclos_completos[-5:] if ciclos_completos else [],
+            'todos_ciclos': ciclos_completos,  # Lista completa de todos os ciclos
         }
 
     def criar_perfis_de_jogos(self) -> pd.DataFrame:
