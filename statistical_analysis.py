@@ -22,7 +22,7 @@ from config import (
     PESO_FREQUENCIA, PESO_ATRASO, PESO_TENDENCIA,
     PESO_QUADRANTE, PESO_PARIDADE, PESO_BAIXO_MEDIO_ALTO,
     PESO_LINHAS, PESO_COLUNAS, PESO_SOMA, PESO_CICLO, PESO_POISSON,
-    PESO_FREQUENCIA_HNF,
+    PESO_FREQUENCIA_HNF, PESO_SEQUENCIA,
     SOMA_IDEAL_MIN, SOMA_IDEAL_MAX, SOMA_IDEAL_MEDIA
 )
 
@@ -733,6 +733,159 @@ class MegaSenaAnalyzer:
         }
 
     # =========================================================================
+    # ANÁLISE 13: SEQUÊNCIAS CONSECUTIVAS
+    # =========================================================================
+
+    def analisar_sequencias_historico(self) -> Dict[str, any]:
+        """
+        Analisa padrões de sequências (números consecutivos) no histórico.
+
+        Returns:
+            Dict com estatísticas de sequências
+        """
+        padroes_sequencia = Counter()
+        total_jogos = len(self.df)
+
+        for _, row in self.df.iterrows():
+            dezenas = sorted([row['D1'], row['D2'], row['D3'], row['D4'], row['D5'], row['D6']])
+
+            # Contar sequências no jogo
+            sequencias = []
+            seq_atual = [dezenas[0]]
+
+            for i in range(1, len(dezenas)):
+                if dezenas[i] == dezenas[i-1] + 1:
+                    seq_atual.append(dezenas[i])
+                else:
+                    if len(seq_atual) >= 2:
+                        sequencias.append(seq_atual)
+                    seq_atual = [dezenas[i]]
+
+            if len(seq_atual) >= 2:
+                sequencias.append(seq_atual)
+
+            # Classificar padrão
+            qtd_seq = len(sequencias)
+            tamanhos = [len(s) for s in sequencias]
+
+            if qtd_seq == 0:
+                padrao = "0 seq"
+            elif qtd_seq == 1:
+                padrao = f"1 seq ({tamanhos[0]} nums)"
+            else:
+                padrao = f"{qtd_seq} seqs"
+
+            padroes_sequencia[padrao] += 1
+
+        # Calcular percentuais
+        resultado = {
+            'padroes': {},
+            'total_jogos': total_jogos,
+            'media_sequencias': 0,
+            'jogos_sem_sequencia': 0,
+            'jogos_com_sequencia': 0
+        }
+
+        for padrao, count in padroes_sequencia.most_common():
+            resultado['padroes'][padrao] = {
+                'count': count,
+                'percentual': round((count / total_jogos) * 100, 2)
+            }
+            if padrao == "0 seq":
+                resultado['jogos_sem_sequencia'] = count
+            else:
+                resultado['jogos_com_sequencia'] += count
+
+        return resultado
+
+    def validar_sequencias_jogo(self, dezenas: List[int]) -> Dict[str, any]:
+        """
+        Valida as sequências em um jogo específico.
+
+        Args:
+            dezenas: Lista de números do jogo
+
+        Returns:
+            Dict com análise das sequências
+        """
+        dezenas_sorted = sorted(dezenas)
+        sequencias = []
+        seq_atual = [dezenas_sorted[0]]
+
+        for i in range(1, len(dezenas_sorted)):
+            if dezenas_sorted[i] == dezenas_sorted[i-1] + 1:
+                seq_atual.append(dezenas_sorted[i])
+            else:
+                if len(seq_atual) >= 2:
+                    sequencias.append(seq_atual)
+                seq_atual = [dezenas_sorted[i]]
+
+        if len(seq_atual) >= 2:
+            sequencias.append(seq_atual)
+
+        qtd_seq = len(sequencias)
+        tamanhos = [len(s) for s in sequencias]
+
+        if qtd_seq == 0:
+            padrao = "0 seq"
+        elif qtd_seq == 1:
+            padrao = f"1 seq ({tamanhos[0]} nums)"
+        else:
+            padrao = f"{qtd_seq} seqs"
+
+        return {
+            'qtd_sequencias': qtd_seq,
+            'sequencias': sequencias,
+            'tamanhos': tamanhos,
+            'padrao': padrao,
+            'numeros_em_sequencia': [n for seq in sequencias for n in seq]
+        }
+
+    def calcular_score_sequencia(self, num: int) -> float:
+        """
+        Calcula score baseado em padrões de sequência.
+
+        Números que formam sequências com vizinhos frequentes ganham pontos.
+        Mas sequências muito longas são raras, então há um equilíbrio.
+
+        Args:
+            num: Número de 1 a 60
+
+        Returns:
+            Score de 0 a 100
+        """
+        # Analisar frequência de sequências com vizinhos
+        vizinho_anterior = num - 1 if num > 1 else None
+        vizinho_posterior = num + 1 if num < 60 else None
+
+        freq = self.calcular_frequencias()
+
+        score = 50  # Base
+
+        # Se os vizinhos têm boa frequência, há chance de formar sequência
+        if vizinho_anterior and vizinho_anterior in freq:
+            freq_viz_ant = freq[vizinho_anterior]
+            media_freq = sum(freq.values()) / len(freq)
+            if freq_viz_ant > media_freq:
+                score += 15  # Vizinho anterior é frequente
+
+        if vizinho_posterior and vizinho_posterior in freq:
+            freq_viz_pos = freq[vizinho_posterior]
+            media_freq = sum(freq.values()) / len(freq)
+            if freq_viz_pos > media_freq:
+                score += 15  # Vizinho posterior é frequente
+
+        # Bônus para números no "meio" do volante (mais combinações possíveis)
+        if 10 <= num <= 50:
+            score += 10
+
+        # Penalizar extremos (1-5 e 56-60) que têm menos opções de sequência
+        if num <= 5 or num >= 56:
+            score -= 10
+
+        return max(0, min(100, score))
+
+    # =========================================================================
     # CÁLCULO DO SCORE FINAL (0-100)
     # =========================================================================
 
@@ -857,10 +1010,13 @@ class MegaSenaAnalyzer:
         prob_poisson = self.calcular_probabilidade_poisson(num)
         score_poisson = prob_poisson * 100
 
-        # 12. Score H-N-F (Quente/Neutro/Frio) - 9% - NOVA REGRA
+        # 12. Score H-N-F (Quente/Neutro/Frio) - 7%
         score_hnf = self.calcular_score_hnf(num)
 
-        # Score Final Ponderado
+        # 13. Score de Sequências - 6% - NOVA REGRA
+        score_sequencia = self.calcular_score_sequencia(num)
+
+        # Score Final Ponderado (13 regras)
         score_final = (
             PESO_FREQUENCIA * score_freq +
             PESO_ATRASO * score_atraso +
@@ -873,7 +1029,8 @@ class MegaSenaAnalyzer:
             PESO_SOMA * score_soma +
             PESO_CICLO * score_ciclo +
             PESO_POISSON * score_poisson +
-            PESO_FREQUENCIA_HNF * score_hnf
+            PESO_FREQUENCIA_HNF * score_hnf +
+            PESO_SEQUENCIA * score_sequencia
         )
 
         return {
@@ -891,6 +1048,7 @@ class MegaSenaAnalyzer:
             'score_ciclo': round(score_ciclo, 2),
             'score_poisson': round(score_poisson, 2),
             'score_hnf': round(score_hnf, 2),
+            'score_sequencia': round(score_sequencia, 2),
             'faixa_hnf': self.get_faixa_frequencia(num),
         }
 

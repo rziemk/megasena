@@ -99,19 +99,20 @@ JANELA_HOT = 10           # Últimos N jogos para análise "Hot"
 JANELA_COLD = 50          # Janela para análise "Cold" (atraso)
 CICLO_RENOVACAO = 15      # Ciclo médio de renovação (concursos)
 
-# Pesos para cálculo do Score (Total = 1.0) - 12 REGRAS
-PESO_FREQUENCIA = 0.14        # Frequência histórica
-PESO_ATRASO = 0.14            # Atraso (regressão à média)
-PESO_TENDENCIA = 0.09         # Tendência recente
-PESO_QUADRANTE = 0.09         # Equilíbrio por quadrante
-PESO_PARIDADE = 0.07          # Contribuição par/ímpar
-PESO_BAIXO_MEDIO_ALTO = 0.07  # Contribuição Baixo/Médio/Alto (3 faixas)
-PESO_LINHAS = 0.07            # Distribuição por linhas do volante
-PESO_COLUNAS = 0.07           # Distribuição por colunas do volante
+# Pesos para cálculo do Score (Total = 1.0) - 13 REGRAS
+PESO_FREQUENCIA = 0.09        # Frequência histórica
+PESO_ATRASO = 0.09            # Atraso (regressão à média)
+PESO_TENDENCIA = 0.08         # Tendência recente
+PESO_QUADRANTE = 0.08         # Equilíbrio por quadrante
+PESO_PARIDADE = 0.08          # Contribuição par/ímpar
+PESO_BAIXO_MEDIO_ALTO = 0.08  # Contribuição Baixo/Médio/Alto (3 faixas)
+PESO_LINHAS = 0.08            # Distribuição por linhas do volante
+PESO_COLUNAS = 0.08           # Distribuição por colunas do volante
 PESO_SOMA = 0.07              # Contribuição para soma ideal (150-200)
-PESO_CICLO = 0.05             # Números faltantes no ciclo atual
-PESO_POISSON = 0.05           # Probabilidade Poisson
-PESO_FREQUENCIA_HNF = 0.09    # Faixas de Frequência H-N-F (Quente/Neutro/Frio)
+PESO_CICLO = 0.07             # Números faltantes no ciclo atual
+PESO_POISSON = 0.07           # Probabilidade Poisson
+PESO_FREQUENCIA_HNF = 0.07    # Faixas de Frequência H-N-F (Quente/Neutro/Frio)
+PESO_SEQUENCIA = 0.06         # Padrões de sequências consecutivas
 
 # Faixa ideal de Soma (onde ~60% dos sorteios caem)
 SOMA_IDEAL_MIN = 150
