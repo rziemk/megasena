@@ -25,7 +25,7 @@ client = ClickHouseClient()
 # =============================================================================
 DEFAULT_CONFIG = {
     # Budget
-    'budget': 1000.00,
+    'budget': 11000.00,
 
     # R4 - Quadrantes (padrões aceitos)
     # Top 8 padrões mais frequentes historicamente (~65% dos sorteios)
@@ -571,63 +571,86 @@ def validar_jogo(analise, config):
     n_dezenas = analise.get('n_dezenas', 6)
     config_adj = ajustar_config_por_dezenas(config, n_dezenas) if n_dezenas > 6 else config
 
+    # IMPORTANTE: Para jogos > 6 dezenas, usar apenas validação por RANGE
+    # Padrões específicos só funcionam bem para 6 dezenas (histórico real)
+    usar_padroes = (n_dezenas == 6)
+
     # R4 - Quadrantes
-    # Usar padrões expandidos e escalados do config_adj
-    if config_adj.get('quadrantes_aceitos'):
-        if analise['padrao_quad'] not in config_adj['quadrantes_aceitos']:
+    if usar_padroes and config.get('quadrantes_aceitos'):
+        # Jogos de 6: validar padrão específico
+        if analise['padrao_quad'] not in config['quadrantes_aceitos']:
             return False
     else:
+        # Jogos > 6: validar apenas ranges (distribuição equilibrada)
         quadrantes_vazios = sum(1 for v in analise['quadrantes'].values() if v == 0)
-        if quadrantes_vazios > config_adj.get('max_quadrantes_vazios', 2):
+        max_quadrantes_vazios = 1 if n_dezenas >= 8 else 2  # Mais dezenas = menos vazios
+        if quadrantes_vazios > max_quadrantes_vazios:
             return False
-        if max(analise['quadrantes'].values()) > config_adj.get('max_por_quadrante', 3):
+        # Para jogos grandes, permitir até 60% das dezenas em um quadrante
+        max_por_quad = max(4, int(n_dezenas * 0.6))  # 6 dez=4, 10 dez=6, 16 dez=9
+        if max(analise['quadrantes'].values()) > max_por_quad:
             return False
 
     # R5 - Paridade
-    # Usar padrões expandidos e escalados do config_adj
-    if config_adj.get('paridade_aceita'):
-        if analise['padrao_par'] not in config_adj['paridade_aceita']:
+    if usar_padroes and config.get('paridade_aceita'):
+        # Jogos de 6: validar padrão específico
+        if analise['padrao_par'] not in config['paridade_aceita']:
             return False
     else:
-        if analise['pares'] < config_adj.get('min_pares', 2) or analise['pares'] > config_adj.get('max_pares', 4):
+        # Jogos > 6: validar apenas range (próximo de 50/50)
+        min_pares = max(1, n_dezenas // 4)       # Pelo menos 25% pares
+        max_pares = n_dezenas - min_pares        # No máximo 75% pares
+        if analise['pares'] < min_pares or analise['pares'] > max_pares:
             return False
 
     # R6 - Faixas BMA
-    # Usar padrões expandidos e escalados do config_adj
-    if config_adj.get('bma_aceito'):
-        if analise['padrao_bma'] not in config_adj['bma_aceito']:
+    if usar_padroes and config.get('bma_aceito'):
+        # Jogos de 6: validar padrão específico
+        if analise['padrao_bma'] not in config['bma_aceito']:
             return False
     else:
-        if min(analise['faixas'].values()) < config_adj.get('min_por_faixa', 0):
+        # Jogos > 6: validar apenas range (distribuição equilibrada)
+        min_por_faixa = max(0, (n_dezenas // 3) - 2)  # Pelo menos 1/3 - 2 em cada faixa
+        max_por_faixa = (n_dezenas // 3) + 3          # No máximo 1/3 + 3 em cada faixa
+        if min(analise['faixas'].values()) < min_por_faixa:
             return False
-        if max(analise['faixas'].values()) > config_adj.get('max_por_faixa', 4):
-            return False
-
-    # R7 - Linhas
-    if analise['linhas_usadas'] < config_adj.get('min_linhas', 4):
-        return False
-
-    # R8 - Terminações
-    if analise['terminacoes_usadas'] < config_adj.get('min_terminacoes', 5):
-        return False
-
-    # R9 - Soma (usando valores ajustados)
-    if config.get('validar_soma', True):
-        soma_min = config_adj.get('soma_min', 140)
-        soma_max = config_adj.get('soma_max', 210)
-        if analise['soma'] < soma_min or analise['soma'] > soma_max:
+        if max(analise['faixas'].values()) > max_por_faixa:
             return False
 
-    # R12 - H-N-F (usando valores ajustados)
-    if analise['hot_count'] < config_adj.get('min_hot', 0) or analise['hot_count'] > config_adj.get('max_hot', 6):
-        return False
-    if analise['neutral_count'] < config_adj.get('min_neutral', 0) or analise['neutral_count'] > config_adj.get('max_neutral', 6):
-        return False
-    if analise['cold_count'] < config_adj.get('min_cold', 0) or analise['cold_count'] > config_adj.get('max_cold', 6):
+    # R7 - Linhas (escala com dezenas - mais flexível)
+    # Para 6-7 dezenas: mínimo 3 linhas, para 8+ dezenas: escala
+    min_linhas = max(3, (n_dezenas + 1) // 3)  # 3 para 6-8, 4 para 9-11, 5 para 12+
+    if analise['linhas_usadas'] < min_linhas:
         return False
 
-    # R13 - Consecutivos (usando valor ajustado)
-    if analise['consecutivos'] > config_adj.get('max_consecutivos', 2):
+    # R8 - Terminações (escala com dezenas - mais flexível)
+    # Para jogos grandes é impossível ter 10 terminações diferentes com pool limitado
+    # Mínimo: ~50% das dezenas (6 dez=3, 10 dez=5, 16 dez=8)
+    min_terminacoes = max(3, n_dezenas // 2)
+    if analise['terminacoes_usadas'] < min_terminacoes:
+        return False
+
+    # R9 - Soma (escala proporcionalmente: ~30.5 por dezena)
+    soma_ideal = 30.5 * n_dezenas
+    margem = soma_ideal * 0.20  # ±20% da média ideal
+    soma_min = int(soma_ideal - margem)
+    soma_max = int(soma_ideal + margem)
+    if analise['soma'] < soma_min or analise['soma'] > soma_max:
+        return False
+
+    # R12 - H-N-F (mais flexível - apenas limita extremos)
+    # Não queremos TODOS hot ou TODOS cold, mas algum equilíbrio
+    # Limite: máximo 80% cold (permitir alguns frios que podem estar "devidos")
+    max_cold = max(3, int(n_dezenas * 0.8))  # Até 80% cold
+    if analise['cold_count'] > max_cold:
+        return False
+    # Não limitar hot - números quentes são bons!
+
+    # R13 - Consecutivos (escala com dezenas)
+    # Para jogos grandes, é natural ter mais pares consecutivos
+    # 6 dez: máx 2, 10 dez: máx 3, 16 dez: máx 5
+    max_consecutivos = max(2, n_dezenas // 3)
+    if analise['consecutivos'] > max_consecutivos:
         return False
 
     # R14 - Freq. Quadrante (verificar se tem pelo menos 1 número dos quadrantes prioritários)
@@ -711,7 +734,7 @@ def gerar_jogos_budget(budget, config=None, verbose=True):
 
     jogos_gerados = []
     budget_restante = budget
-    numeros_usados_recentemente = set()  # Para evitar repetição excessiva
+    jogos_existentes = set()  # Apenas para evitar jogos 100% idênticos
 
     while budget_restante >= TABELA_CUSTOS_OFICIAL[6]:  # Mínimo é jogo de 6 dezenas
         jogo_gerado = False
@@ -732,8 +755,9 @@ def gerar_jogos_budget(budget, config=None, verbose=True):
                 scores_dict=scores_dict,
                 hnf_dict=hnf_dict,
                 config=config,
-                numeros_usados=numeros_usados_recentemente,
-                max_tentativas=300
+                numeros_usados=None,  # Permite repetir números entre jogos
+                max_tentativas=300,
+                jogos_existentes=jogos_existentes  # Só evita jogos idênticos
             )
 
             # Segunda tentativa: sem padrões específicos (só validação por range)
@@ -749,8 +773,9 @@ def gerar_jogos_budget(budget, config=None, verbose=True):
                     scores_dict=scores_dict,
                     hnf_dict=hnf_dict,
                     config=config_relaxado,
-                    numeros_usados=numeros_usados_recentemente,
-                    max_tentativas=200
+                    numeros_usados=None,  # Permite repetir números entre jogos
+                    max_tentativas=200,
+                    jogos_existentes=jogos_existentes  # Só evita jogos idênticos
                 )
 
             if jogo:
@@ -759,13 +784,8 @@ def gerar_jogos_budget(budget, config=None, verbose=True):
                 jogos_gerados.append(jogo)
                 budget_restante -= custo
 
-                # Marcar números como usados recentemente (para diversificar)
-                for num in jogo['numeros']:
-                    numeros_usados_recentemente.add(num)
-
-                # Limpar números usados a cada 5 jogos para permitir reuso
-                if len(jogos_gerados) % 5 == 0:
-                    numeros_usados_recentemente.clear()
+                # Adicionar jogo ao set de existentes (só para evitar jogos 100% idênticos)
+                jogos_existentes.add(tuple(sorted(jogo['numeros'])))
 
                 if verbose:
                     print(f"   ✅ Jogo #{len(jogos_gerados)}: {n_dezenas} dezenas | R$ {custo:,.2f} | Restante: R$ {budget_restante:,.2f}")
@@ -798,7 +818,7 @@ def gerar_jogos_budget(budget, config=None, verbose=True):
     return jogos_gerados
 
 
-def gerar_um_jogo(n_dezenas, pool, scores_dict, hnf_dict, config, numeros_usados=None, max_tentativas=500):
+def gerar_um_jogo(n_dezenas, pool, scores_dict, hnf_dict, config, numeros_usados=None, max_tentativas=500, jogos_existentes=None):
     """
     Gera um único jogo válido com n_dezenas.
 
@@ -812,14 +832,18 @@ def gerar_um_jogo(n_dezenas, pool, scores_dict, hnf_dict, config, numeros_usados
     3. Manter boa distribuição para atender filtros
 
     Score de jogos maiores deve ser >= jogos menores (mais cobertura = melhor)
+
+    Args:
+        jogos_existentes: Set de tuplas com jogos já gerados (para evitar 100% idênticos)
     """
     if numeros_usados is None:
         numeros_usados = set()
 
-    # Pool disponível (priorizar números não usados recentemente)
-    pool_disponivel = [n for n in pool if n not in numeros_usados]
-    if len(pool_disponivel) < n_dezenas:
-        pool_disponivel = pool  # Se não tem suficiente, usa o pool completo
+    if jogos_existentes is None:
+        jogos_existentes = set()
+
+    # Pool disponível - agora usa todo o pool (números podem repetir entre jogos)
+    pool_disponivel = pool  # Não filtra mais por numeros_usados
 
     # Ordenar pool por score (do maior para menor)
     pool_ordenado = sorted(pool_disponivel, key=lambda x: scores_dict.get(x, 0), reverse=True)
@@ -832,16 +856,43 @@ def gerar_um_jogo(n_dezenas, pool, scores_dict, hnf_dict, config, numeros_usados
         'Q4': [n for n in pool_disponivel if 46 <= n <= 60],
     }
 
+    import random
+
     for tentativa in range(max_tentativas):
         numeros = []
 
-        # PASSO 1: SEMPRE começar com os TOP 6 números do pool (base de qualidade)
-        # Isso garante que o jogo tenha no mínimo a mesma qualidade de um jogo de 6
-        top_6 = pool_ordenado[:6]
-        numeros.extend(top_6)
+        # PASSO 1: Selecionar números com aleatoriedade ponderada por score
+        # Para jogos grandes (>10 dez): usar top números + variação
+        # Para jogos menores: usar seleção ponderada por score para diversificar
+        if n_dezenas > 10:
+            # Jogos grandes: começar com top 6 + variação nos extras
+            top_6 = pool_ordenado[:6]
+            numeros.extend(top_6)
+        else:
+            # Jogos de 6-10: usar seleção ponderada por score
+            # Isso permite variação mantendo qualidade
+            scores_pool = [scores_dict.get(n, 0) for n in pool_disponivel]
+            min_score = min(scores_pool) if scores_pool else 0
+            # Normalizar scores para pesos (evitar negativos)
+            pesos = [s - min_score + 1 for s in scores_pool]
+            soma_pesos = sum(pesos)
+            probs = [p / soma_pesos for p in pesos]
+
+            # Selecionar n_dezenas números com probabilidade proporcional ao score
+            try:
+                selecionados = random.choices(pool_disponivel, weights=probs, k=min(n_dezenas + 4, len(pool_disponivel)))
+                # Remover duplicatas mantendo ordem
+                vistos = set()
+                for n in selecionados:
+                    if n not in vistos and len(numeros) < n_dezenas:
+                        numeros.append(n)
+                        vistos.add(n)
+            except ValueError:
+                # Fallback: usar top N
+                numeros = pool_ordenado[:n_dezenas]
 
         # PASSO 2: Se precisa de mais dezenas, adicionar mantendo distribuição
-        if n_dezenas > 6:
+        if n_dezenas > len(numeros):
             # Verificar quais quadrantes ainda precisam de números
             quads_presentes = {
                 'Q1': sum(1 for n in numeros if 1 <= n <= 15),
@@ -899,6 +950,11 @@ def gerar_um_jogo(n_dezenas, pool, scores_dict, hnf_dict, config, numeros_usados
 
         # Analisar e validar
         analise = analisar_jogo(numeros, scores_dict, hnf_dict)
+
+        # Verificar se jogo já existe (evitar 100% idênticos)
+        jogo_tuple = tuple(sorted(numeros))
+        if jogo_tuple in jogos_existentes:
+            continue  # Jogo já existe, tentar outro
 
         if validar_jogo(analise, config):
             # =================================================================
