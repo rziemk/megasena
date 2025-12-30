@@ -95,24 +95,26 @@ LIMITE_ALTO_BAIXO = 30  # 1-30 = Baixo, 31-60 = Alto
 # =============================================================================
 # CONFIGURAÇÕES DE ANÁLISE ESTATÍSTICA
 # =============================================================================
-JANELA_HOT = 10           # Últimos N jogos para análise "Hot"
+JANELA_HOT = 48           # R3: Tendência - média de ciclos completos (concursos)
 JANELA_COLD = 50          # Janela para análise "Cold" (atraso)
-CICLO_RENOVACAO = 15      # Ciclo médio de renovação (concursos)
+CICLO_RENOVACAO = 27      # R10: Ciclo - mínimo histórico de ciclos completos (concursos)
 
-# Pesos para cálculo do Score (Total = 1.0) - 13 REGRAS
-PESO_FREQUENCIA = 0.09        # Frequência histórica
-PESO_ATRASO = 0.09            # Atraso (regressão à média)
-PESO_TENDENCIA = 0.08         # Tendência recente
-PESO_QUADRANTE = 0.08         # Equilíbrio por quadrante
-PESO_PARIDADE = 0.08          # Contribuição par/ímpar
-PESO_BAIXO_MEDIO_ALTO = 0.08  # Contribuição Baixo/Médio/Alto (3 faixas)
-PESO_LINHAS = 0.08            # Distribuição por linhas do volante
-PESO_COLUNAS = 0.08           # Distribuição por colunas do volante
-PESO_SOMA = 0.07              # Contribuição para soma ideal (150-200)
-PESO_CICLO = 0.07             # Números faltantes no ciclo atual
-PESO_POISSON = 0.07           # Probabilidade Poisson
-PESO_FREQUENCIA_HNF = 0.07    # Faixas de Frequência H-N-F (Quente/Neutro/Frio)
-PESO_SEQUENCIA = 0.06         # Padrões de sequências consecutivas
+# Pesos para cálculo do Score (Total = 1.0) - 15 REGRAS
+PESO_FREQUENCIA = 0.09        # R1: Frequência histórica
+PESO_ATRASO = 0.09            # R2: Atraso (regressão à média)
+PESO_TENDENCIA = 0.07         # R3: Tendência recente
+PESO_QUADRANTE = 0.07         # R4: Equilíbrio por quadrante
+PESO_PARIDADE = 0.06          # R5: Contribuição par/ímpar
+PESO_BAIXO_MEDIO_ALTO = 0.06  # R6: Contribuição Baixo/Médio/Alto (3 faixas)
+PESO_LINHAS = 0.07            # R7: Distribuição por linhas do volante
+PESO_COLUNAS = 0.07           # R8: Distribuição por colunas do volante
+PESO_SOMA = 0.07              # R9: Contribuição para soma ideal (150-200)
+PESO_CICLO = 0.07             # R10: Números faltantes no ciclo de 15 concursos
+PESO_POISSON = 0.06           # R11: Probabilidade Poisson
+PESO_FREQUENCIA_HNF = 0.06    # R12: Faixas de Frequência H-N-F (Quente/Neutro/Frio)
+PESO_SEQUENCIA = 0.06         # R13: Padrões de sequências consecutivas
+PESO_FREQ_QUADRANTE = 0.06    # R14: Frequência por quadrante (histórico)
+PESO_PRESSAO_CICLO = 0.04     # R15: Pressão do ciclo completo (números faltantes)
 
 # Faixa ideal de Soma (onde ~60% dos sorteios caem)
 SOMA_IDEAL_MIN = 150

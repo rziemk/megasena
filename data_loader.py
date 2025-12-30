@@ -276,12 +276,12 @@ class MegaSenaDataLoader:
         }
 
 
-def load_data(source: str = 'synthetic', filepath: Optional[str] = None) -> pd.DataFrame:
+def load_data(source: str = 'clickhouse', filepath: Optional[str] = None) -> pd.DataFrame:
     """
     Função de conveniência para carregar dados.
 
     Args:
-        source: 'synthetic', 'csv', 'excel', ou 'api'
+        source: 'clickhouse', 'synthetic', 'csv', 'excel', ou 'api'
         filepath: Caminho do arquivo (para csv/excel)
 
     Returns:
@@ -289,7 +289,20 @@ def load_data(source: str = 'synthetic', filepath: Optional[str] = None) -> pd.D
     """
     loader = MegaSenaDataLoader()
 
-    if source == 'synthetic':
+    if source == 'clickhouse':
+        try:
+            from clickhouse_client import ClickHouseClient
+            client = ClickHouseClient()
+            df = client.get_sorteios()
+            # Renomear colunas para compatibilidade
+            df.columns = ['Concurso', 'Data', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6']
+            loader.df = df
+            return df
+        except Exception as e:
+            print(f"Erro ao conectar ao ClickHouse: {e}")
+            print("Usando dados sintéticos como fallback...")
+            return loader.generate_synthetic_data()
+    elif source == 'synthetic':
         return loader.generate_synthetic_data()
     elif source == 'csv' and filepath:
         return loader.load_from_csv(filepath)
@@ -298,8 +311,8 @@ def load_data(source: str = 'synthetic', filepath: Optional[str] = None) -> pd.D
     elif source == 'api':
         return loader.load_from_api()
     else:
-        print("Gerando dados sintéticos por padrão...")
-        return loader.generate_synthetic_data()
+        print("Usando ClickHouse por padrão...")
+        return load_data('clickhouse')
 
 
 if __name__ == "__main__":
