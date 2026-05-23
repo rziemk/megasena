@@ -11,11 +11,24 @@ import subprocess
 
 def verificar_e_atualizar():
     """
-    Verifica se há novos concursos e atualiza a tabela ciclos_completos se necessário.
+    1) Importa concursos faltantes da API da Caixa para loterias.megasena.
+    2) Recalcula a tabela ciclos_completos se houver novos concursos.
 
     Returns:
-        bool: True se houve atualização, False caso contrário
+        dict: resumo da importação com chaves:
+          importados, ultimo_concurso, ultima_data, falhas, erro, ciclos_atualizados
     """
+    # Importar concursos novos da Caixa antes de recalcular ciclos.
+    # Import tardio pra evitar ciclo de imports (importar_concursos chama este módulo).
+    resumo_import = None
+    try:
+        from importar_concursos import importar_faltantes
+        resumo_import = importar_faltantes(atualizar_ciclos=False)
+    except Exception as e:
+        print(f"⚠️  Erro ao importar concursos novos da Caixa: {e}")
+        print("   Seguindo com os dados já existentes...")
+        resumo_import = {"erro": str(e), "importados": 0}
+
     client = ClickHouseClient()
 
     # 1. Pegar último concurso da tabela megasena
@@ -31,9 +44,10 @@ def verificar_e_atualizar():
     except:
         ultimo_concurso_ciclos = 0
 
-    # 3. Se não há novos concursos, retornar False
+    # 3. Se não há novos concursos, retornar resumo (sem recálculo de ciclos)
     if ultimo_concurso_megasena <= ultimo_concurso_ciclos:
-        return False
+        resumo_import["ciclos_atualizados"] = False
+        return resumo_import
 
     # 4. Há novos concursos! Recalcular toda a tabela ciclos_completos
     print(f"🔄 Novos concursos detectados! Megasena: {ultimo_concurso_megasena}, Ciclos: {ultimo_concurso_ciclos}")
@@ -82,6 +96,17 @@ def verificar_e_atualizar():
 
     ciclos_df = pd.DataFrame(ciclos)
 
+    # Garantir que a tabela existe
+    client.query("""
+        CREATE TABLE IF NOT EXISTS loterias.ciclos_completos (
+            concurso_inicio UInt32,
+            concurso_fim UInt32,
+            duracao UInt32,
+            completo UInt8
+        ) ENGINE = MergeTree()
+        ORDER BY concurso_inicio
+    """)
+
     # TRUNCAR e inserir novos dados
     client.query("TRUNCATE TABLE loterias.ciclos_completos")
 
@@ -106,15 +131,18 @@ def verificar_e_atualizar():
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"❌ Erro ao atualizar ciclos: {result.stderr if result.stderr else result.stdout}")
-        return False
+        resumo_import["ciclos_atualizados"] = False
+        resumo_import["erro"] = resumo_import.get("erro") or "Falha ao atualizar ciclos_completos"
+        return resumo_import
 
     print(f"✅ Tabela ciclos_completos atualizada com {len(ciclos_df)} registros!")
-    return True
+    resumo_import["ciclos_atualizados"] = True
+    return resumo_import
 
 
 if __name__ == "__main__":
-    atualizado = verificar_e_atualizar()
-    if atualizado:
+    resumo = verificar_e_atualizar()
+    if resumo and resumo.get("importados", 0) > 0:
         print("\n✅ Dados atualizados com sucesso!")
     else:
         print("\n✓ Dados já estão atualizados!")

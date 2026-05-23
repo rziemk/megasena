@@ -40,17 +40,18 @@ views_sql = [
     # R2: Atraso
     """
     CREATE OR REPLACE VIEW loterias.v_atraso AS
+    WITH atrasos AS (
+        SELECT
+            numero,
+            (SELECT max(concurso) FROM loterias.megasena) - max(concurso) AS atraso
+        FROM loterias.resultados
+        GROUP BY numero
+    )
     SELECT
         numero,
-        (SELECT max(concurso) FROM loterias.megasena) -
-        max(concurso) as atraso,
-        round(((SELECT max(concurso) FROM loterias.megasena) - max(concurso)) /
-            (SELECT max(atraso_max) FROM (
-                SELECT max((SELECT max(concurso) FROM loterias.megasena) - max(concurso)) as atraso_max
-                FROM loterias.resultados GROUP BY numero
-            )) * 100, 2) as score_atraso
-    FROM loterias.resultados
-    GROUP BY numero
+        atraso,
+        round(atraso / (SELECT max(atraso) FROM atrasos) * 100, 2) AS score_atraso
+    FROM atrasos
     ORDER BY atraso DESC
     """,
 
@@ -194,12 +195,20 @@ views_sql = [
     # R11: Poisson (distribuição de probabilidade)
     """
     CREATE OR REPLACE VIEW loterias.v_poisson AS
+    WITH n_concursos AS (
+        SELECT count(DISTINCT concurso) AS n FROM loterias.resultados
+    )
     SELECT
         numero,
-        count() as freq,
-        round(exp(-(count() / (SELECT count(DISTINCT concurso) FROM loterias.resultados))) *
-              pow(count() / (SELECT count(DISTINCT concurso) FROM loterias.resultados), count()) /
-              factorial(count()), 4) * 100 as score_poisson
+        count() AS freq,
+        round(
+            exp(
+                -(count() / (SELECT n FROM n_concursos))
+                + count() * ln(count() / (SELECT n FROM n_concursos))
+                - lgamma(count() + 1)
+            ) * 100,
+            4
+        ) AS score_poisson
     FROM loterias.resultados
     GROUP BY numero
     ORDER BY numero
@@ -288,6 +297,53 @@ views_sql = [
     FROM numeros n
     JOIN quad_freq qf ON n.quadrante = qf.quadrante
     ORDER BY n.numero
+    """,
+
+    # R15: Pressão do Ciclo Completo (60 números)
+    # Para números que ainda NÃO saíram no ciclo atual (incompleto), pressão cresce
+    # proporcional à duração do ciclo atual vs duração média dos ciclos históricos.
+    # Números que já saíram no ciclo atual têm pressão 0.
+    """
+    CREATE OR REPLACE VIEW loterias.v_pressao_ciclo AS
+    WITH
+        ciclo_atual AS (
+            SELECT concurso_inicio, concurso_fim, duracao
+            FROM loterias.ciclos_completos
+            WHERE completo = 0
+            ORDER BY concurso_inicio DESC
+            LIMIT 1
+        ),
+        duracao_media AS (
+            SELECT avg(duracao) AS media
+            FROM loterias.ciclos_completos
+            WHERE completo = 1
+        ),
+        sairam_ciclo_atual AS (
+            SELECT DISTINCT numero
+            FROM (
+                SELECT concurso, numero
+                FROM loterias.megasena
+                ARRAY JOIN [bola1, bola2, bola3, bola4, bola5, bola6] AS numero
+            )
+            WHERE concurso >= (SELECT concurso_inicio FROM ciclo_atual)
+              AND concurso <= (SELECT concurso_fim FROM ciclo_atual)
+        )
+    SELECT
+        n.numero AS numero,
+        if(n.numero IN (SELECT numero FROM sairam_ciclo_atual), 0, 1) AS faltante_ciclo_atual,
+        round(
+            if(
+                n.numero IN (SELECT numero FROM sairam_ciclo_atual),
+                0,
+                least(
+                    (SELECT duracao FROM ciclo_atual) / nullif((SELECT media FROM duracao_media), 0) * 100,
+                    100
+                )
+            ),
+            2
+        ) AS score_pressao_ciclo
+    FROM (SELECT number AS numero FROM numbers(1, 61) WHERE number BETWEEN 1 AND 60) n
+    ORDER BY score_pressao_ciclo DESC
     """,
 
     # View final v_scores com todas as 15 regras

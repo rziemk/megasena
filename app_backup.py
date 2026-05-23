@@ -937,32 +937,8 @@ def main():
         # Auto-atualizar dados apenas uma vez por sessão
         if not st.session_state.ja_verificou_update:
             from auto_update_data import verificar_e_atualizar
-            with st.spinner("🔄 Verificando concursos novos na Caixa..."):
-                resumo = verificar_e_atualizar()
-            st.session_state.resumo_update = resumo
+            verificar_e_atualizar()
             st.session_state.ja_verificou_update = True
-
-        # Mostrar resumo da última atualização (persiste enquanto a sessão estiver viva)
-        resumo = st.session_state.get("resumo_update")
-        if resumo:
-            if resumo.get("erro") and resumo.get("importados", 0) == 0:
-                st.warning(f"⚠️ Não foi possível atualizar: {resumo['erro']}")
-            elif resumo.get("importados", 0) > 0:
-                ultimo = resumo.get("ultimo_concurso")
-                data_ult = resumo.get("ultima_data")
-                falhas = resumo.get("falhas") or []
-                msg = (
-                    f"✅ Importados **{resumo['importados']}** concursos novos da Caixa "
-                    f"(do {resumo['ultimo_db_antes'] + 1} ao **{ultimo}**, "
-                    f"último sorteio em **{data_ult}**)."
-                )
-                if falhas:
-                    msg += f" {len(falhas)} concurso(s) falharam: {falhas}."
-                st.success(msg)
-            else:
-                ultimo = resumo.get("ultimo_concurso")
-                if ultimo:
-                    st.info(f"✓ Dados já estavam atualizados. Último concurso no DB: **{ultimo}**.")
 
     # Carregar dados (usa cache do @st.cache_data ou session_state)
     try:
@@ -1023,61 +999,17 @@ def main():
     valor_aposta = st.number_input(
         "Valor total da aposta (R$)",
         min_value=1000.0,
-        max_value=10000000.0,
-        value=11000.0,
+        max_value=100000.0,
+        value=1000.0,
         step=100.0,
         format="%.2f",
         help="Mínimo de R$ 1.000,00 para garantir diversificação adequada"
     )
 
-    # Calcular melhor combinação de jogos para o budget
-    def calcular_melhor_combinacao(budget):
-        """Calcula a melhor combinação de jogos que maximiza o uso do budget."""
-        melhor_combo = []
-        budget_restante = budget
-
-        # Tentar do maior para o menor (greedy)
-        for n_dez in range(20, 5, -1):
-            custo = TABELA_CUSTOS_OFICIAL.get(n_dez)
-            if custo and custo <= budget_restante:
-                qtd = int(budget_restante / custo)
-                if qtd > 0:
-                    melhor_combo.append((n_dez, qtd, custo * qtd))
-                    budget_restante -= custo * qtd
-
-        return melhor_combo, budget - budget_restante, budget_restante
-
-    combo, valor_usado, sobra = calcular_melhor_combinacao(valor_aposta)
-
-    # Formatar a combinação como texto
-    if combo:
-        combo_texto = " + ".join([f"{qtd}x{dez}dez" for dez, qtd, _ in combo])
-        # Calcular total de combinações de 6 cobertas
-        from math import comb
-        total_combinacoes = sum(comb(dez, 6) * qtd for dez, qtd, _ in combo)
-    else:
-        combo_texto = "Nenhuma combinação possível"
-        total_combinacoes = 0
-
-    # Mostrar card com a melhor combinação
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 15px; border-radius: 12px; margin: 10px 0;">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <span style="color: #ffc107; font-size: 0.8rem;">💡 MELHOR COMBINAÇÃO</span>
-                <div style="color: white; font-size: 1.1rem; font-weight: bold; margin-top: 3px;">{combo_texto}</div>
-            </div>
-            <div style="text-align: right;">
-                <div style="color: #28a745; font-size: 0.9rem;">✅ R$ {valor_usado:,.2f} usado</div>
-                <div style="color: #6c757d; font-size: 0.75rem;">Sobra: R$ {sobra:,.2f}</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.1); padding: 8px 15px; border-radius: 8px; text-align: center;">
-                <div style="color: #667eea; font-size: 0.7rem;">COMBINAÇÕES DE 6</div>
-                <div style="color: white; font-size: 1rem; font-weight: bold;">{total_combinacoes:,}</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Mostrar quantos jogos de 6 dezenas cabem no orçamento
+    custo_jogo_6 = TABELA_CUSTOS_OFICIAL[6]
+    jogos_possiveis = int(valor_aposta / custo_jogo_6)
+    st.info(f"💡 Com R$ {valor_aposta:,.2f} você pode fazer até **{jogos_possiveis} jogos** de 6 dezenas (R$ {custo_jogo_6:.2f} cada)")
 
     st.markdown("---")
 
@@ -1221,66 +1153,70 @@ def main():
     st.markdown(filtros_html, unsafe_allow_html=True)
 
     # ==============================================================
-    # 2.5 FILTROS IDEAIS RECOMENDADOS (Layout Visual)
+    # 2.5 FILTROS IDEAIS RECOMENDADOS
     # ==============================================================
     st.markdown("---")
-    st.markdown("#### 💡 Filtros Ideais para Geração de Jogos")
-    st.markdown("*Valores pré-populados no gerador de jogos*")
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; color: #fff;">
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #667eea; font-weight: bold; font-size: 0.75rem;">🔲 R4 - Quadrantes</div>
-                <div style="font-size: 1.1rem;">1-1-2-2</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">ou 2-1-2-1, 1-2-2-1</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #4169E1; font-weight: bold; font-size: 0.75rem;">⚖️ R5 - Paridade</div>
-                <div style="font-size: 1.1rem;">3P/3I</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">ou 4P/2I, 2P/4I</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #FF8C00; font-weight: bold; font-size: 0.75rem;">📶 R6 - Faixas BMA</div>
-                <div style="font-size: 1.1rem;">2-2-2</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">ou 2-3-1, 3-2-1</div>
-            </div>
+    with st.expander("💡 **Filtros Ideais para Geração de Jogos** (Valores pré-populados)", expanded=False):
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+            <p style="margin: 0; color: #2e7d32; font-size: 0.9rem;">
+                <strong>📊 Baseado em análise histórica de 2.800+ concursos da Mega-Sena.</strong><br>
+                Estes valores representam os padrões mais frequentes nos sorteios reais.
+            </p>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #17a2b8; font-weight: bold; font-size: 0.75rem;">➡️ R7 - Linhas</div>
-                <div style="font-size: 1.1rem;">5 ou 6</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">~85% sorteios</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #e83e8c; font-weight: bold; font-size: 0.75rem;">⬇️ R8 - Terminações</div>
-                <div style="font-size: 1.1rem;">5 ou 6</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">~68% sorteios</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #ffc107; font-weight: bold; font-size: 0.75rem;">➕ R9 - Soma</div>
-                <div style="font-size: 1.1rem;">180-209</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">28.3% | ou 150-179 (24.2%)</div>
-            </div>
+        """, unsafe_allow_html=True)
+
+        col_ideal1, col_ideal2 = st.columns(2)
+
+        with col_ideal1:
+            st.markdown("""
+            **🔲 R4 - Quadrantes (Top 6 padrões - ~60% dos sorteios)**
+            - `1-1-2-2` | `2-1-2-1` | `1-2-2-1`
+            - `1-2-1-2` | `2-1-1-2` | `2-2-1-1`
+
+            **⚖️ R5 - Paridade (Top 3 padrões - ~85% dos sorteios)**
+            - `3P/3I` (3 pares, 3 ímpares) - **mais frequente**
+            - `4P/2I` | `2P/4I`
+
+            **📶 R6 - Faixas B/M/A (Top 6 padrões - ~60%)**
+            - `2-2-2` (equilibrado) - **mais frequente**
+            - `2-3-1` | `3-2-1` | `1-3-2` | `2-1-3` | `1-2-3`
+
+            **➡️ R7 - Linhas**
+            - Mínimo: **4 linhas** (~95% dos sorteios)
+
+            **⬇️ R8 - Terminações**
+            - Mínimo: **4 diferentes** (~90% dos sorteios)
+            """)
+
+        with col_ideal2:
+            st.markdown("""
+            **➕ R9 - Soma dos 6 números**
+            - Faixa ideal: **150 a 200** (~60% dos sorteios)
+            - Média histórica: **175**
+
+            **🔥 R12 - H-N-F (Hot-Neutral-Frio)**
+            - Hot (≥6 aparições em 48 conc.): **1 a 4**
+            - Neutral (4-5 aparições): **1 a 4**
+            - Frio (<4 aparições): **0 a 3**
+            - Padrão ideal: **2-3H, 2-3N, 0-2F**
+
+            **🔢 R13 - Consecutivos**
+            - Máximo: **2** (~90% dos sorteios têm 0-2)
+
+            **🗺️ R14 - Frequência por Quadrante**
+            - Q3 (31-45) historicamente mais frequente
+            - Priorizar quadrantes com maior frequência
+            """)
+
+        st.markdown("""
+        <div style="background: #fff3e0; padding: 10px; border-radius: 8px; margin-top: 10px;">
+            <p style="margin: 0; color: #e65100; font-size: 0.85rem;">
+                <strong>⚡ Dica:</strong> Para jogos com mais de 6 dezenas, os filtros são automaticamente
+                escalados proporcionalmente. Ex: Para 16 dezenas, R4 aceita padrões como "3-4-5-4".
+            </p>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #ff6b6b; font-weight: bold; font-size: 0.75rem;">🔥 R12 - H-N-F</div>
-                <div style="font-size: 1.1rem;">2H-3N-1F</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">15.3% | ou 1H-4N-1F (10.9%)</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #28a745; font-weight: bold; font-size: 0.75rem;">🔢 R13 - Consecutivos</div>
-                <div style="font-size: 1.1rem;">0 ou 1</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">92.9% sorteios</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
-                <div style="color: #9b59b6; font-weight: bold; font-size: 0.75rem;">🗺️ R14 - Freq. Quadrante</div>
-                <div style="font-size: 1.1rem;">Q3 (31-45)</div>
-                <div style="font-size: 0.65rem; opacity: 0.7;">Score 100 (maior freq.)</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -1345,8 +1281,7 @@ def main():
     # Montar config com os filtros (ordem: R4, R5, R6, R7, R8, R9, R12, R13, R14)
     config = DEFAULT_CONFIG.copy()
     config['valor_aposta'] = valor_aposta
-    # Número total de jogos da combinação calculada
-    config['n_jogos'] = sum(qtd for _, qtd, _ in combo) if combo else 0
+    config['n_jogos'] = jogos_possiveis
 
     # R4 - Quadrantes - filtrar "Qualquer" e se vazio, usar None (aceita tudo)
     quadrantes_filtrados = [q for q in quadrantes_selecionados if q != "Qualquer"]
@@ -1459,67 +1394,6 @@ def main():
                 <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
                     <div style="color: #ccc; font-size: 0.8rem;">Score Médio</div>
                     <div style="color: white; font-size: 1.5rem; font-weight: bold;">{df_jogos['score_combinado'].mean():.1f}</div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ========================================
-        # CÁLCULO DE PROBABILIDADE
-        # ========================================
-        from math import comb
-
-        # Total de combinações possíveis na Mega-Sena: C(60,6)
-        TOTAL_COMBINACOES_MEGA = comb(60, 6)  # 50.063.860
-
-        # Calcular combinações cobertas por cada jogo
-        # Jogo de N dezenas cobre C(N,6) combinações de sena
-        combinacoes_por_jogo = []
-        for j in jogos_list:
-            n_dez = j.get('n_dezenas', len(j['numeros']))
-            comb_jogo = comb(n_dez, 6)
-            combinacoes_por_jogo.append({
-                'n_dezenas': n_dez,
-                'combinacoes': comb_jogo
-            })
-
-        # Soma total de combinações (nota: pode haver sobreposição entre jogos)
-        total_combinacoes_cobertas = sum(c['combinacoes'] for c in combinacoes_por_jogo)
-
-        # Probabilidade de acertar a sena (assumindo sem sobreposição significativa)
-        probabilidade = total_combinacoes_cobertas / TOTAL_COMBINACOES_MEGA
-        probabilidade_pct = probabilidade * 100
-
-        # Chance 1 em X
-        if probabilidade > 0:
-            chance_1_em = int(1 / probabilidade)
-        else:
-            chance_1_em = TOTAL_COMBINACOES_MEGA
-
-        # Card de probabilidade
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%); padding: 20px; border-radius: 15px; margin: 15px 0;">
-            <h3 style="color: white; margin: 0 0 15px 0; text-align: center;">🎲 Análise de Probabilidade</h3>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
-                <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
-                    <div style="color: #bdc3c7; font-size: 0.85rem;">Combinações Cobertas</div>
-                    <div style="color: white; font-size: 1.4rem; font-weight: bold;">{total_combinacoes_cobertas:,}</div>
-                    <div style="color: #bdc3c7; font-size: 0.75rem;">de {TOTAL_COMBINACOES_MEGA:,} possíveis</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
-                    <div style="color: #bdc3c7; font-size: 0.85rem;">Probabilidade de Sena</div>
-                    <div style="color: #2ecc71; font-size: 1.4rem; font-weight: bold;">{probabilidade_pct:.6f}%</div>
-                    <div style="color: #bdc3c7; font-size: 0.75rem;">com todos os jogos</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
-                    <div style="color: #bdc3c7; font-size: 0.85rem;">Chance</div>
-                    <div style="color: #f39c12; font-size: 1.4rem; font-weight: bold;">1 em {chance_1_em:,}</div>
-                    <div style="color: #bdc3c7; font-size: 0.75rem;">aproximadamente</div>
-                </div>
-            </div>
-            <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.1); border-radius: 8px;">
-                <div style="color: #ecf0f1; font-size: 0.85rem; text-align: center;">
-                    📊 <b>Combinações por tipo:</b> {' | '.join([f"{nd}dez: {comb(nd,6):,}" for nd in sorted(dist_dezenas.keys(), reverse=True)])}
                 </div>
             </div>
         </div>
@@ -1682,49 +1556,96 @@ def main():
     st.markdown("---")
 
     # ==========================================================================
-    # SEÇÃO 2: QUADRO DE REGRAS (COMPACTO)
+    # SEÇÃO 2: QUADRO DE REGRAS
     # ==========================================================================
+    st.markdown("## 📋 Quadro de Regras do Sistema")
+
+    # Buscar regras do banco de dados (usa função cacheada)
     try:
         regras_df = carregar_regras()
+
+        # Separar por tipo
         regras_individual = regras_df[regras_df['tipo'] == 'individual']
         regras_conjunto = regras_df[regras_df['tipo'] == 'conjunto']
+
         peso_ind = regras_individual['peso'].sum()
         peso_conj = regras_conjunto['peso'].sum()
 
-        # Header compacto com resumo inline
+        # Resumo compacto
         st.markdown(f"""
-        <div style="display: flex; align-items: center; gap: 15px; margin: 10px 0 15px 0;">
-            <span style="font-size: 1.3rem; font-weight: bold;">📋 Regras do Sistema</span>
-            <span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 4px 12px; border-radius: 15px; font-size: 0.8rem;">15 Regras</span>
-            <span style="background: #4169E1; color: white; padding: 4px 10px; border-radius: 15px; font-size: 0.75rem;">📍 6 Individuais ({peso_ind:.0f}%)</span>
-            <span style="background: #FF8C00; color: white; padding: 4px 10px; border-radius: 15px; font-size: 0.75rem;">🎯 9 Conjunto ({peso_conj:.0f}%)</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Grid compacto com todas as regras
-        # Individuais (R1-R6) + Conjunto (R4-R15)
-        regras_ind_html = ' '.join([
-            f'<span style="background: rgba(65,105,225,0.15); color: #4169E1; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; white-space: nowrap;"><b>{r["codigo"]}</b> {r["nome"]} <span style="opacity:0.7;">({r["peso"]:.0f}%)</span></span>'
-            for _, r in regras_individual.iterrows()
-        ])
-        regras_conj_html = ' '.join([
-            f'<span style="background: rgba(255,140,0,0.15); color: #FF8C00; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; white-space: nowrap;"><b>{r["codigo"]}</b> {r["nome"]} <span style="opacity:0.7;">({r["peso"]:.0f}%)</span></span>'
-            for _, r in regras_conjunto.iterrows()
-        ])
-
-        st.markdown(f"""
-        <div style="background: #f8f9fa; padding: 12px; border-radius: 8px; margin-bottom: 10px;">
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
-                {regras_ind_html}
+        <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 15px 25px; border-radius: 10px; color: white; flex: 1; text-align: center;">
+                <div style="font-size: 2rem; font-weight: bold;">15</div>
+                <div style="font-size: 0.9rem;">Regras Totais</div>
             </div>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                {regras_conj_html}
+            <div style="background: linear-gradient(135deg, #4169E1 0%, #1e40af 100%); padding: 15px 25px; border-radius: 10px; color: white; flex: 1; text-align: center;">
+                <div style="font-size: 2rem; font-weight: bold;">6</div>
+                <div style="font-size: 0.9rem;">Individuais ({peso_ind:.0f}%)</div>
+            </div>
+            <div style="background: linear-gradient(135deg, #FF8C00 0%, #dc6900 100%); padding: 15px 25px; border-radius: 10px; color: white; flex: 1; text-align: center;">
+                <div style="font-size: 2rem; font-weight: bold;">9</div>
+                <div style="font-size: 0.9rem;">Conjunto ({peso_conj:.0f}%)</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        # Mapeamento de views por regra
+        views_por_regra = {
+            'R1': 'v_frequencia',
+            'R2': 'v_atraso',
+            'R3': 'v_tendencia',
+            'R4': 'v_concurso_analise (q1-q4_count)',
+            'R5': 'v_concurso_analise (pares/impares)',
+            'R6': 'v_concurso_analise (baixo/medio/alto)',
+            'R7': 'v_concurso_analise (l1-l6_count)',
+            'R8': 'v_concurso_analise (c0-c9_count)',
+            'R9': 'v_concurso_analise (soma)',
+            'R10': 'v_ciclo',
+            'R11': 'v_poisson',
+            'R12': 'v_classificacao_hnf + v_concurso_analise',
+            'R13': 'v_concurso_analise (sequencias)',
+            'R14': 'v_score_freq_quadrante',
+            'R15': 'v_pressao_ciclo',
+        }
+
+        # Criar HTML das regras em 2 colunas
+        col1_r, col2_r = st.columns(2)
+
+        with col1_r:
+            st.markdown("#### 📍 Individuais")
+            for _, r in regras_individual.iterrows():
+                view_ref = views_por_regra.get(r['codigo'], '-')
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 12px; border-radius: 8px; margin: 8px 0; border-left: 4px solid #4169E1;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong style="color: #4169E1;">{r['codigo']}</strong>
+                        <span style="background: #4169E1; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">{r['peso']:.0f}%</span>
+                    </div>
+                    <div style="font-weight: 600; margin: 4px 0;">{r['nome']}</div>
+                    <div style="font-size: 0.85rem; color: #666;">{r['descricao_curta']}</div>
+                    <div style="font-size: 0.75rem; color: #28a745; margin-top: 4px; font-family: monospace;">📂 {view_ref}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with col2_r:
+            st.markdown("#### 🎯 Conjunto")
+            for _, r in regras_conjunto.iterrows():
+                view_ref = views_por_regra.get(r['codigo'], '-')
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 12px; border-radius: 8px; margin: 8px 0; border-left: 4px solid #FF8C00;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong style="color: #FF8C00;">{r['codigo']}</strong>
+                        <span style="background: #FF8C00; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">{r['peso']:.0f}%</span>
+                    </div>
+                    <div style="font-weight: 600; margin: 4px 0;">{r['nome']}</div>
+                    <div style="font-size: 0.85rem; color: #666;">{r['descricao_curta']}</div>
+                    <div style="font-size: 0.75rem; color: #28a745; margin-top: 4px; font-family: monospace;">📂 {view_ref}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Erro ao carregar regras: {e}")
+        st.info("Verifique se a tabela loterias.regras existe no banco de dados.")
 
     st.markdown("---")
 
@@ -1743,404 +1664,1039 @@ def main():
     st.markdown("#### 📍 Regras Individuais (R1, R2, R3, R10, R11, R15)")
     st.markdown("*Análise de cada número de 1 a 60*")
 
-    # Top 6 números
-    st.markdown("##### 🏆 Top 6 por Score Individual")
-    cols = st.columns(6)
-    for i, (_, row) in enumerate(score_ind.head(6).iterrows()):
-        with cols[i]:
-            st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #4169E1 0%, #1e40af 100%);
-                        padding: 12px; border-radius: 10px; text-align: center; color: white;">
-                <div style="font-size: 1.8rem; font-weight: bold;">{int(row['numero']):02d}</div>
-                <div style="font-size: 1rem;">{row['score_individual']:.1f}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Estatísticas das regras individuais em 2 colunas
-    col1, col2 = st.columns(2)
-
-    with col1:
-        # R1 - Frequência
-        st.markdown("##### 📊 R1 - Frequência Histórica")
-        st.caption("Quantas vezes cada número foi sorteado")
-        r1_stats = ch_client.query('''
-            SELECT
-                multiIf(r1_freq >= 90, '90+ (Muito Alta)', r1_freq >= 80, '80-89 (Alta)',
-                        r1_freq >= 70, '70-79 (Média-Alta)', '< 70 (Média)') as faixa,
-                count(*) as qtd
-            FROM loterias.v_score_individual
-            GROUP BY faixa ORDER BY faixa DESC
-        ''')
-        for _, r in r1_stats.iterrows():
-            pct = float(r['qtd']) / 60 * 100
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span>{r['faixa']}</span><span>{int(r['qtd'])} números</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: #4169E1; width: {pct}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # R3 - Tendência
-        st.markdown("##### 🔥 R3 - Tendência Recente (48 concursos)")
-        st.caption("Aparições nos últimos 48 concursos")
-        r3_stats = ch_client.query('''
-            SELECT
-                multiIf(r3_tend >= 80, 'Quente (80+)', r3_tend >= 50, 'Morno (50-79)',
-                        r3_tend >= 20, 'Frio (20-49)', 'Gelado (<20)') as faixa,
-                count(*) as qtd
-            FROM loterias.v_score_individual
-            GROUP BY faixa ORDER BY faixa DESC
-        ''')
-        for _, r in r3_stats.iterrows():
-            pct = float(r['qtd']) / 60 * 100
-            cor = '#dc3545' if 'Quente' in r['faixa'] else '#ffc107' if 'Morno' in r['faixa'] else '#17a2b8'
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span>{r['faixa']}</span><span>{int(r['qtd'])} números</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: {cor}; width: {pct}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # R11 - Poisson
-        st.markdown("##### 📈 R11 - Distribuição de Poisson")
-        st.caption("Probabilidade estatística esperada")
-        r11_stats = ch_client.query('''
-            SELECT round(avg(r11_poisson), 1) as media, round(min(r11_poisson), 1) as minimo, round(max(r11_poisson), 1) as maximo
-            FROM loterias.v_score_individual
-        ''')
-        st.markdown(f"""
-        <div style="display: flex; gap: 10px; margin: 5px 0;">
-            <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1;">
-                <div style="font-size: 1.2rem; font-weight: bold; color: #4169E1;">{r11_stats.iloc[0]['media']}</div>
-                <div style="font-size: 0.7rem; color: #666;">Média</div>
-            </div>
-            <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1;">
-                <div style="font-size: 1.2rem; font-weight: bold; color: #28a745;">{r11_stats.iloc[0]['minimo']}</div>
-                <div style="font-size: 0.7rem; color: #666;">Mín</div>
-            </div>
-            <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1;">
-                <div style="font-size: 1.2rem; font-weight: bold; color: #dc3545;">{r11_stats.iloc[0]['maximo']}</div>
-                <div style="font-size: 0.7rem; color: #666;">Máx</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        # R2 - Atraso
-        st.markdown("##### ⏰ R2 - Atraso (Regressão à Média)")
-        st.caption("Há quantos concursos o número não sai")
-        r2_stats = ch_client.query('''
-            SELECT
-                multiIf(r2_atraso >= 80, 'Alto (80+)', r2_atraso >= 50, 'Médio (50-79)',
-                        r2_atraso >= 20, 'Baixo (20-49)', 'Recente (<20)') as faixa,
-                count(*) as qtd
-            FROM loterias.v_score_individual
-            GROUP BY faixa ORDER BY faixa DESC
-        ''')
-        for _, r in r2_stats.iterrows():
-            pct = float(r['qtd']) / 60 * 100
-            cor = '#dc3545' if 'Alto' in r['faixa'] else '#ffc107' if 'Médio' in r['faixa'] else '#28a745'
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span>{r['faixa']}</span><span>{int(r['qtd'])} números</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: {cor}; width: {pct}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # R10 - Ciclo
-        st.markdown("##### 🔄 R10 - Ciclo de Renovação (27 concursos)")
-        st.caption("Números faltantes ganham score 100")
-        r10_stats = ch_client.query('''
-            SELECT if(r10_ciclo = 100, 'Faltante', 'Presente') as status, count(*) as qtd
-            FROM loterias.v_score_individual GROUP BY status
-        ''')
-        faltantes = r10_stats[r10_stats['status'] == 'Faltante']['qtd'].values
-        faltantes_qtd = int(faltantes[0]) if len(faltantes) > 0 else 0
-        presentes_qtd = 60 - faltantes_qtd
-        st.markdown(f"""
-        <div style="display: flex; gap: 10px; margin: 5px 0;">
-            <div style="background: #dc3545; color: white; padding: 10px 15px; border-radius: 8px; text-align: center; flex: 1;">
-                <div style="font-size: 1.5rem; font-weight: bold;">{faltantes_qtd}</div>
-                <div style="font-size: 0.8rem;">Faltantes (100)</div>
-            </div>
-            <div style="background: #28a745; color: white; padding: 10px 15px; border-radius: 8px; text-align: center; flex: 1;">
-                <div style="font-size: 1.5rem; font-weight: bold;">{presentes_qtd}</div>
-                <div style="font-size: 0.8rem;">Presentes (0)</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # R15 - Pressão Ciclo
-        st.markdown("##### 🎯 R15 - Pressão do Ciclo Completo")
-        st.caption("Pressão dos números faltantes no ciclo de 60")
-        r15_stats = ch_client.query('''
-            SELECT round(max(r15_pressao), 1) as max_pressao,
-                   count(if(r15_pressao > 0, 1, NULL)) as com_pressao
-            FROM loterias.v_score_individual
-        ''')
-        max_pressao = r15_stats.iloc[0]['max_pressao']
-        com_pressao = int(r15_stats.iloc[0]['com_pressao'])
-        st.markdown(f"""
-        <div style="display: flex; gap: 10px; margin: 5px 0;">
-            <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1; border-left: 3px solid #dc3545;">
-                <div style="font-size: 1.2rem; font-weight: bold; color: #dc3545;">{max_pressao}%</div>
-                <div style="font-size: 0.7rem; color: #666;">Pressão Máxima</div>
-            </div>
-            <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1; border-left: 3px solid #ffc107;">
-                <div style="font-size: 1.2rem; font-weight: bold; color: #ffc107;">{com_pressao}</div>
-                <div style="font-size: 0.7rem; color: #666;">Com Pressão</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # Tabela completa
-    with st.expander("📋 Ver tabela completa dos 60 números", expanded=False):
-        display_cols = ['numero', 'r1_freq', 'r2_atraso', 'r3_tend', 'r10_ciclo', 'r11_poisson', 'r15_pressao', 'score_individual']
-        st.dataframe(score_ind[display_cols], use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-
-    # =================================================================
-    # SEÇÃO 2: REGRAS DE CONJUNTO (v_concurso_analise)
-    # =================================================================
-    st.markdown("#### 🎯 Regras de Conjunto (R4, R5, R6, R7, R8, R9, R12, R13, R14)")
-    st.markdown("*Análise do jogo como um todo - padrões históricos*")
-
-    # Linha 1: R4, R5
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("##### 🔲 R4 - Quadrantes (Q1-Q4)")
-        st.caption("Q1: 1-15 | Q2: 16-30 | Q3: 31-45 | Q4: 46-60")
-        quadrantes = ch_client.query('''
-            SELECT concat(toString(q1_count), '-', toString(q2_count), '-', toString(q3_count), '-', toString(q4_count)) as padrao,
-                   count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise
-            GROUP BY q1_count, q2_count, q3_count, q4_count ORDER BY qtd DESC LIMIT 6
-        ''')
-        for _, r in quadrantes.iterrows():
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span><strong>{r['padrao']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: #667eea; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("##### ⚖️ R5 - Paridade (Pares/Ímpares)")
-        st.caption("Equilíbrio entre números pares e ímpares")
-        paridade = ch_client.query('''
-            SELECT concat(toString(pares_count), 'P/', toString(impares_count), 'I') as padrao,
-                   count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise
-            GROUP BY pares_count, impares_count ORDER BY qtd DESC
-        ''')
-        for _, r in paridade.iterrows():
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span><strong>{r['padrao']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: #4169E1; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Linha 2: R6, R7
-    col3, col4 = st.columns(2)
-
-    with col3:
-        st.markdown("##### 📶 R6 - Faixas Baixo/Médio/Alto")
-        st.caption("B: 1-20 | M: 21-40 | A: 41-60")
-        bma = ch_client.query('''
-            SELECT concat(toString(baixo_count), '-', toString(medio_count), '-', toString(alto_count)) as padrao,
-                   count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise
-            GROUP BY baixo_count, medio_count, alto_count ORDER BY qtd DESC LIMIT 6
-        ''')
-        for _, r in bma.iterrows():
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span><strong>{r['padrao']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: #FF8C00; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    with col4:
-        st.markdown("##### ➡️ R7 - Linhas do Volante")
-        st.caption("L1: 1-10 | L2: 11-20 | ... | L6: 51-60")
-        linhas = ch_client.query('''
-            SELECT (if(l1_count > 0, 1, 0) + if(l2_count > 0, 1, 0) + if(l3_count > 0, 1, 0) +
-                    if(l4_count > 0, 1, 0) + if(l5_count > 0, 1, 0) + if(l6_count > 0, 1, 0)) as linhas_usadas,
-                   count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise GROUP BY linhas_usadas ORDER BY qtd DESC
-        ''')
-        for _, r in linhas.iterrows():
-            cor = '#28a745' if r['linhas_usadas'] >= 5 else '#ffc107' if r['linhas_usadas'] == 4 else '#dc3545'
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span><strong>{int(r['linhas_usadas'])} linhas</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: {cor}; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Linha 3: R8, R9
-    col5, col6 = st.columns(2)
-
-    with col5:
-        st.markdown("##### ⬇️ R8 - Colunas/Terminações")
-        st.caption("Terminações 0-9 (final do número)")
-        colunas = ch_client.query('''
-            SELECT (if(c0_count > 0, 1, 0) + if(c1_count > 0, 1, 0) + if(c2_count > 0, 1, 0) +
-                    if(c3_count > 0, 1, 0) + if(c4_count > 0, 1, 0) + if(c5_count > 0, 1, 0) +
-                    if(c6_count > 0, 1, 0) + if(c7_count > 0, 1, 0) + if(c8_count > 0, 1, 0) +
-                    if(c9_count > 0, 1, 0)) as terminacoes,
-                   count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise GROUP BY terminacoes ORDER BY qtd DESC
-        ''')
-        for _, r in colunas.iterrows():
-            cor = '#28a745' if r['terminacoes'] >= 5 else '#ffc107' if r['terminacoes'] == 4 else '#dc3545'
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span><strong>{int(r['terminacoes'])} terminações</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: {cor}; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    with col6:
-        st.markdown("##### ➕ R9 - Soma dos 6 Números")
-        st.caption("Faixa ideal: 150-210")
-        soma = ch_client.query('''
-            SELECT multiIf(soma < 120, '< 120', soma < 150, '120-149', soma < 180, '150-179',
-                          soma < 210, '180-209', soma < 240, '210-239', '>= 240') as faixa,
-                   count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise GROUP BY faixa ORDER BY qtd DESC
-        ''')
-        for _, r in soma.iterrows():
-            cor = '#28a745' if '150' in str(r['faixa']) or '180' in str(r['faixa']) else '#ffc107'
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span><strong>{r['faixa']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: {cor}; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Linha 4: R12, R13
-    col7, col8 = st.columns(2)
-
-    with col7:
-        st.markdown("##### 🔥 R12 - H-N-F (Hot-Neutral-Frio)")
-        st.caption("Classificacao por aparicoes nos ultimos 48 concursos: H>=6, N=4-5, F<=3")
-        hnf = ch_client.query('''
-            SELECT
-                concat(toString(hot_count), 'H-', toString(neutral_count), 'N-', toString(cold_count), 'F') as pattern,
-                count(*) as qtd,
-                round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise
-            GROUP BY hot_count, neutral_count, cold_count
-            ORDER BY qtd DESC
-            LIMIT 6
-        ''')
-        for _, r in hnf.iterrows():
-            # Cor verde se tiver 2-3H, 2-3N, 0-2F (ideal)
-            pattern = r['pattern']
-            h = int(pattern.split('H')[0])
-            n = int(pattern.split('H-')[1].split('N')[0])
-            f = int(pattern.split('N-')[1].split('F')[0])
-            ideal = (2 <= h <= 3) and (2 <= n <= 4) and (f <= 2)
-            cor = '#28a745' if ideal else '#ffc107'
-            st.markdown(f"""
-            <div style="margin: 4px 0;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span><strong>{r['pattern']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
-                </div>
-                <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
-                    <div style="background: {cor}; width: {min(float(r['pct']) * 3, 100)}%; height: 6px; border-radius: 4px;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    with col8:
-        st.markdown("##### 🔢 R13 - Sequências Consecutivas")
-        st.caption("Quantidade de números consecutivos no jogo (ex: 12-13, 25-26)")
-        seq = ch_client.query('''
-            SELECT sequencias_consecutivas as seq, count(*) as qtd,
-                   round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
-            FROM loterias.v_concurso_analise GROUP BY seq ORDER BY qtd DESC
-        ''')
-        cols_seq = st.columns(len(seq))
-        for i, (_, r) in enumerate(seq.iterrows()):
-            cor = '#28a745' if r['seq'] <= 1 else '#ffc107' if r['seq'] == 2 else '#dc3545'
-            with cols_seq[i]:
+        # Top 6 números
+        st.markdown("##### 🏆 Top 6 por Score Individual")
+        cols = st.columns(6)
+        for i, (_, row) in enumerate(score_ind.head(6).iterrows()):
+            with cols[i]:
                 st.markdown(f"""
-                <div style="background: {cor}; color: white; padding: 10px; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 1.3rem; font-weight: bold;">{int(r['seq'])}</div>
-                    <div style="font-size: 0.8rem;">{r['pct']}%</div>
-                    <div style="font-size: 0.7rem; opacity: 0.8;">{int(r['qtd'])}x</div>
+                <div style="background: linear-gradient(135deg, #4169E1 0%, #1e40af 100%);
+                            padding: 12px; border-radius: 10px; text-align: center; color: white;">
+                    <div style="font-size: 1.8rem; font-weight: bold;">{int(row['numero']):02d}</div>
+                    <div style="font-size: 1rem;">{row['score_individual']:.1f}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-    # Linha 5: R14 - Frequência por Quadrante
-    st.markdown("##### 🗺️ R14 - Frequência por Quadrante")
-    st.caption("Score médio de frequência histórica por quadrante (maior = mais sorteado)")
-    freq_quad = ch_client.query('''
-        SELECT quadrante, round(avg(score_freq_quadrante), 1) as score_medio
-        FROM loterias.v_score_freq_quadrante
-        GROUP BY quadrante
-        ORDER BY quadrante
-    ''')
-    cols_r14 = st.columns(4)
-    cores_quad = {'Q1': '#667eea', 'Q2': '#17a2b8', 'Q3': '#28a745', 'Q4': '#ffc107'}
-    labels_quad = {'Q1': '1-15', 'Q2': '16-30', 'Q3': '31-45', 'Q4': '46-60'}
-    for i, (_, r) in enumerate(freq_quad.iterrows()):
-        quad = r['quadrante']
-        score = float(r['score_medio'])
-        cor = cores_quad.get(quad, '#666')
-        label = labels_quad.get(quad, '')
-        destaque = ' (Maior)' if score == 100 else ''
-        with cols_r14[i]:
+        # Estatísticas das regras individuais em 2 colunas
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # R1 - Frequência
+            st.markdown("##### 📊 R1 - Frequência Histórica")
+            st.caption("Quantas vezes cada número foi sorteado")
+            r1_stats = ch_client.query('''
+                SELECT
+                    multiIf(r1_freq >= 90, '90+ (Muito Alta)', r1_freq >= 80, '80-89 (Alta)',
+                            r1_freq >= 70, '70-79 (Média-Alta)', '< 70 (Média)') as faixa,
+                    count(*) as qtd
+                FROM loterias.v_score_individual
+                GROUP BY faixa ORDER BY faixa DESC
+            ''')
+            for _, r in r1_stats.iterrows():
+                pct = float(r['qtd']) / 60 * 100
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span>{r['faixa']}</span><span>{int(r['qtd'])} números</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: #4169E1; width: {pct}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # R3 - Tendência
+            st.markdown("##### 🔥 R3 - Tendência Recente (48 concursos)")
+            st.caption("Aparições nos últimos 48 concursos")
+            r3_stats = ch_client.query('''
+                SELECT
+                    multiIf(r3_tend >= 80, 'Quente (80+)', r3_tend >= 50, 'Morno (50-79)',
+                            r3_tend >= 20, 'Frio (20-49)', 'Gelado (<20)') as faixa,
+                    count(*) as qtd
+                FROM loterias.v_score_individual
+                GROUP BY faixa ORDER BY faixa DESC
+            ''')
+            for _, r in r3_stats.iterrows():
+                pct = float(r['qtd']) / 60 * 100
+                cor = '#dc3545' if 'Quente' in r['faixa'] else '#ffc107' if 'Morno' in r['faixa'] else '#17a2b8'
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span>{r['faixa']}</span><span>{int(r['qtd'])} números</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: {cor}; width: {pct}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # R11 - Poisson
+            st.markdown("##### 📈 R11 - Distribuição de Poisson")
+            st.caption("Probabilidade estatística esperada")
+            r11_stats = ch_client.query('''
+                SELECT round(avg(r11_poisson), 1) as media, round(min(r11_poisson), 1) as minimo, round(max(r11_poisson), 1) as maximo
+                FROM loterias.v_score_individual
+            ''')
             st.markdown(f"""
-            <div style="background: {cor}; color: white; padding: 12px; border-radius: 8px; text-align: center;">
-                <div style="font-size: 1rem; font-weight: bold;">{quad}</div>
-                <div style="font-size: 0.7rem; opacity: 0.8;">{label}</div>
-                <div style="font-size: 1.4rem; font-weight: bold; margin-top: 5px;">{score}</div>
-                <div style="font-size: 0.7rem;">{destaque}</div>
+            <div style="display: flex; gap: 10px; margin: 5px 0;">
+                <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #4169E1;">{r11_stats.iloc[0]['media']}</div>
+                    <div style="font-size: 0.7rem; color: #666;">Média</div>
+                </div>
+                <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #28a745;">{r11_stats.iloc[0]['minimo']}</div>
+                    <div style="font-size: 0.7rem; color: #666;">Mín</div>
+                </div>
+                <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #dc3545;">{r11_stats.iloc[0]['maximo']}</div>
+                    <div style="font-size: 0.7rem; color: #666;">Máx</div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
 
+        with col2:
+            # R2 - Atraso
+            st.markdown("##### ⏰ R2 - Atraso (Regressão à Média)")
+            st.caption("Há quantos concursos o número não sai")
+            r2_stats = ch_client.query('''
+                SELECT
+                    multiIf(r2_atraso >= 80, 'Alto (80+)', r2_atraso >= 50, 'Médio (50-79)',
+                            r2_atraso >= 20, 'Baixo (20-49)', 'Recente (<20)') as faixa,
+                    count(*) as qtd
+                FROM loterias.v_score_individual
+                GROUP BY faixa ORDER BY faixa DESC
+            ''')
+            for _, r in r2_stats.iterrows():
+                pct = float(r['qtd']) / 60 * 100
+                cor = '#dc3545' if 'Alto' in r['faixa'] else '#ffc107' if 'Médio' in r['faixa'] else '#28a745'
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span>{r['faixa']}</span><span>{int(r['qtd'])} números</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: {cor}; width: {pct}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # R10 - Ciclo
+            st.markdown("##### 🔄 R10 - Ciclo de Renovação (27 concursos)")
+            st.caption("Números faltantes ganham score 100")
+            r10_stats = ch_client.query('''
+                SELECT if(r10_ciclo = 100, 'Faltante', 'Presente') as status, count(*) as qtd
+                FROM loterias.v_score_individual GROUP BY status
+            ''')
+            faltantes = r10_stats[r10_stats['status'] == 'Faltante']['qtd'].values
+            faltantes_qtd = int(faltantes[0]) if len(faltantes) > 0 else 0
+            presentes_qtd = 60 - faltantes_qtd
+            st.markdown(f"""
+            <div style="display: flex; gap: 10px; margin: 5px 0;">
+                <div style="background: #dc3545; color: white; padding: 10px 15px; border-radius: 8px; text-align: center; flex: 1;">
+                    <div style="font-size: 1.5rem; font-weight: bold;">{faltantes_qtd}</div>
+                    <div style="font-size: 0.8rem;">Faltantes (100)</div>
+                </div>
+                <div style="background: #28a745; color: white; padding: 10px 15px; border-radius: 8px; text-align: center; flex: 1;">
+                    <div style="font-size: 1.5rem; font-weight: bold;">{presentes_qtd}</div>
+                    <div style="font-size: 0.8rem;">Presentes (0)</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # R15 - Pressão Ciclo
+            st.markdown("##### 🎯 R15 - Pressão do Ciclo Completo")
+            st.caption("Pressão dos números faltantes no ciclo de 60")
+            r15_stats = ch_client.query('''
+                SELECT round(max(r15_pressao), 1) as max_pressao,
+                       count(if(r15_pressao > 0, 1, NULL)) as com_pressao
+                FROM loterias.v_score_individual
+            ''')
+            max_pressao = r15_stats.iloc[0]['max_pressao']
+            com_pressao = int(r15_stats.iloc[0]['com_pressao'])
+            st.markdown(f"""
+            <div style="display: flex; gap: 10px; margin: 5px 0;">
+                <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1; border-left: 3px solid #dc3545;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #dc3545;">{max_pressao}%</div>
+                    <div style="font-size: 0.7rem; color: #666;">Pressão Máxima</div>
+                </div>
+                <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 6px; text-align: center; flex: 1; border-left: 3px solid #ffc107;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #ffc107;">{com_pressao}</div>
+                    <div style="font-size: 0.7rem; color: #666;">Com Pressão</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Tabela completa
+        with st.expander("📋 Ver tabela completa dos 60 números", expanded=False):
+            display_cols = ['numero', 'r1_freq', 'r2_atraso', 'r3_tend', 'r10_ciclo', 'r11_poisson', 'r15_pressao', 'score_individual']
+            st.dataframe(score_ind[display_cols], use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # =================================================================
+        # SEÇÃO 2: REGRAS DE CONJUNTO (v_concurso_analise)
+        # =================================================================
+        st.markdown("#### 🎯 Regras de Conjunto (R4, R5, R6, R7, R8, R9, R12, R13, R14)")
+        st.markdown("*Análise do jogo como um todo - padrões históricos*")
+
+        # Linha 1: R4, R5
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### 🔲 R4 - Quadrantes (Q1-Q4)")
+            st.caption("Q1: 1-15 | Q2: 16-30 | Q3: 31-45 | Q4: 46-60")
+            quadrantes = ch_client.query('''
+                SELECT concat(toString(q1_count), '-', toString(q2_count), '-', toString(q3_count), '-', toString(q4_count)) as padrao,
+                       count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise
+                GROUP BY q1_count, q2_count, q3_count, q4_count ORDER BY qtd DESC LIMIT 6
+            ''')
+            for _, r in quadrantes.iterrows():
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span><strong>{r['padrao']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: #667eea; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with col2:
+            st.markdown("##### ⚖️ R5 - Paridade (Pares/Ímpares)")
+            st.caption("Equilíbrio entre números pares e ímpares")
+            paridade = ch_client.query('''
+                SELECT concat(toString(pares_count), 'P/', toString(impares_count), 'I') as padrao,
+                       count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise
+                GROUP BY pares_count, impares_count ORDER BY qtd DESC
+            ''')
+            for _, r in paridade.iterrows():
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span><strong>{r['padrao']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: #4169E1; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Linha 2: R6, R7
+        col3, col4 = st.columns(2)
+
+        with col3:
+            st.markdown("##### 📶 R6 - Faixas Baixo/Médio/Alto")
+            st.caption("B: 1-20 | M: 21-40 | A: 41-60")
+            bma = ch_client.query('''
+                SELECT concat(toString(baixo_count), '-', toString(medio_count), '-', toString(alto_count)) as padrao,
+                       count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise
+                GROUP BY baixo_count, medio_count, alto_count ORDER BY qtd DESC LIMIT 6
+            ''')
+            for _, r in bma.iterrows():
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span><strong>{r['padrao']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: #FF8C00; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with col4:
+            st.markdown("##### ➡️ R7 - Linhas do Volante")
+            st.caption("L1: 1-10 | L2: 11-20 | ... | L6: 51-60")
+            linhas = ch_client.query('''
+                SELECT (if(l1_count > 0, 1, 0) + if(l2_count > 0, 1, 0) + if(l3_count > 0, 1, 0) +
+                        if(l4_count > 0, 1, 0) + if(l5_count > 0, 1, 0) + if(l6_count > 0, 1, 0)) as linhas_usadas,
+                       count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise GROUP BY linhas_usadas ORDER BY qtd DESC
+            ''')
+            for _, r in linhas.iterrows():
+                cor = '#28a745' if r['linhas_usadas'] >= 5 else '#ffc107' if r['linhas_usadas'] == 4 else '#dc3545'
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span><strong>{int(r['linhas_usadas'])} linhas</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: {cor}; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Linha 3: R8, R9
+        col5, col6 = st.columns(2)
+
+        with col5:
+            st.markdown("##### ⬇️ R8 - Colunas/Terminações")
+            st.caption("Terminações 0-9 (final do número)")
+            colunas = ch_client.query('''
+                SELECT (if(c0_count > 0, 1, 0) + if(c1_count > 0, 1, 0) + if(c2_count > 0, 1, 0) +
+                        if(c3_count > 0, 1, 0) + if(c4_count > 0, 1, 0) + if(c5_count > 0, 1, 0) +
+                        if(c6_count > 0, 1, 0) + if(c7_count > 0, 1, 0) + if(c8_count > 0, 1, 0) +
+                        if(c9_count > 0, 1, 0)) as terminacoes,
+                       count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise GROUP BY terminacoes ORDER BY qtd DESC
+            ''')
+            for _, r in colunas.iterrows():
+                cor = '#28a745' if r['terminacoes'] >= 5 else '#ffc107' if r['terminacoes'] == 4 else '#dc3545'
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span><strong>{int(r['terminacoes'])} terminações</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: {cor}; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with col6:
+            st.markdown("##### ➕ R9 - Soma dos 6 Números")
+            st.caption("Faixa ideal: 150-210")
+            soma = ch_client.query('''
+                SELECT multiIf(soma < 120, '< 120', soma < 150, '120-149', soma < 180, '150-179',
+                              soma < 210, '180-209', soma < 240, '210-239', '>= 240') as faixa,
+                       count(*) as qtd, round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise GROUP BY faixa ORDER BY qtd DESC
+            ''')
+            for _, r in soma.iterrows():
+                cor = '#28a745' if '150' in str(r['faixa']) or '180' in str(r['faixa']) else '#ffc107'
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span><strong>{r['faixa']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: {cor}; width: {float(r['pct'])}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Linha 4: R12, R13
+        col7, col8 = st.columns(2)
+
+        with col7:
+            st.markdown("##### 🔥 R12 - H-N-F (Hot-Neutral-Frio)")
+            st.caption("Classificacao por aparicoes nos ultimos 48 concursos: H>=6, N=4-5, F<=3")
+            hnf = ch_client.query('''
+                SELECT
+                    concat(toString(hot_count), 'H-', toString(neutral_count), 'N-', toString(cold_count), 'F') as pattern,
+                    count(*) as qtd,
+                    round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise
+                GROUP BY hot_count, neutral_count, cold_count
+                ORDER BY qtd DESC
+                LIMIT 6
+            ''')
+            for _, r in hnf.iterrows():
+                # Cor verde se tiver 2-3H, 2-3N, 0-2F (ideal)
+                pattern = r['pattern']
+                h = int(pattern.split('H')[0])
+                n = int(pattern.split('H-')[1].split('N')[0])
+                f = int(pattern.split('N-')[1].split('F')[0])
+                ideal = (2 <= h <= 3) and (2 <= n <= 4) and (f <= 2)
+                cor = '#28a745' if ideal else '#ffc107'
+                st.markdown(f"""
+                <div style="margin: 4px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span><strong>{r['pattern']}</strong></span><span>{r['pct']}% ({int(r['qtd'])}x)</span>
+                    </div>
+                    <div style="background: #e0e0e0; border-radius: 4px; height: 6px;">
+                        <div style="background: {cor}; width: {min(float(r['pct']) * 3, 100)}%; height: 6px; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with col8:
+            st.markdown("##### 🔢 R13 - Sequências Consecutivas")
+            st.caption("Quantidade de números consecutivos no jogo (ex: 12-13, 25-26)")
+            seq = ch_client.query('''
+                SELECT sequencias_consecutivas as seq, count(*) as qtd,
+                       round(count(*) * 100.0 / (SELECT count(*) FROM loterias.v_concurso_analise), 1) as pct
+                FROM loterias.v_concurso_analise GROUP BY seq ORDER BY qtd DESC
+            ''')
+            cols_seq = st.columns(len(seq))
+            for i, (_, r) in enumerate(seq.iterrows()):
+                cor = '#28a745' if r['seq'] <= 1 else '#ffc107' if r['seq'] == 2 else '#dc3545'
+                with cols_seq[i]:
+                    st.markdown(f"""
+                    <div style="background: {cor}; color: white; padding: 10px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 1.3rem; font-weight: bold;">{int(r['seq'])}</div>
+                        <div style="font-size: 0.8rem;">{r['pct']}%</div>
+                        <div style="font-size: 0.7rem; opacity: 0.8;">{int(r['qtd'])}x</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # Linha 5: R14 - Frequência por Quadrante
+        st.markdown("##### 🗺️ R14 - Frequência por Quadrante")
+        st.caption("Score médio de frequência histórica por quadrante (maior = mais sorteado)")
+        freq_quad = ch_client.query('''
+            SELECT quadrante, round(avg(score_freq_quadrante), 1) as score_medio
+            FROM loterias.v_score_freq_quadrante
+            GROUP BY quadrante
+            ORDER BY quadrante
+        ''')
+        cols_r14 = st.columns(4)
+        cores_quad = {'Q1': '#667eea', 'Q2': '#17a2b8', 'Q3': '#28a745', 'Q4': '#ffc107'}
+        labels_quad = {'Q1': '1-15', 'Q2': '16-30', 'Q3': '31-45', 'Q4': '46-60'}
+        for i, (_, r) in enumerate(freq_quad.iterrows()):
+            quad = r['quadrante']
+            score = float(r['score_medio'])
+            cor = cores_quad.get(quad, '#666')
+            label = labels_quad.get(quad, '')
+            destaque = ' (Maior)' if score == 100 else ''
+            with cols_r14[i]:
+                st.markdown(f"""
+                <div style="background: {cor}; color: white; padding: 12px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 1rem; font-weight: bold;">{quad}</div>
+                    <div style="font-size: 0.7rem; opacity: 0.8;">{label}</div>
+                    <div style="font-size: 1.4rem; font-weight: bold; margin-top: 5px;">{score}</div>
+                    <div style="font-size: 0.7rem;">{destaque}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # --- RESUMO RECOMENDAÇÕES ---
+        st.markdown("#### 💡 Filtros Ideais para Geração de Jogos")
+        st.markdown("*Valores pré-populados no gerador de jogos*")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; color: #fff;">
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #667eea; font-weight: bold; font-size: 0.75rem;">🔲 R4 - Quadrantes</div>
+                    <div style="font-size: 1.1rem;">1-1-2-2</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">ou 2-1-2-1, 1-2-2-1</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #4169E1; font-weight: bold; font-size: 0.75rem;">⚖️ R5 - Paridade</div>
+                    <div style="font-size: 1.1rem;">3P/3I</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">ou 4P/2I, 2P/4I</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #FF8C00; font-weight: bold; font-size: 0.75rem;">📶 R6 - Faixas BMA</div>
+                    <div style="font-size: 1.1rem;">2-2-2</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">ou 2-3-1, 3-2-1</div>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #17a2b8; font-weight: bold; font-size: 0.75rem;">➡️ R7 - Linhas</div>
+                    <div style="font-size: 1.1rem;">5 ou 6</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">~85% sorteios</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #e83e8c; font-weight: bold; font-size: 0.75rem;">⬇️ R8 - Terminações</div>
+                    <div style="font-size: 1.1rem;">5 ou 6</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">~68% sorteios</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #ffc107; font-weight: bold; font-size: 0.75rem;">➕ R9 - Soma</div>
+                    <div style="font-size: 1.1rem;">180-209</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">28.3% | ou 150-179 (24.2%)</div>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #ff6b6b; font-weight: bold; font-size: 0.75rem;">🔥 R12 - H-N-F</div>
+                    <div style="font-size: 1.1rem;">2H-3N-1F</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">15.3% | ou 1H-4N-1F (10.9%)</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #28a745; font-weight: bold; font-size: 0.75rem;">🔢 R13 - Consecutivos</div>
+                    <div style="font-size: 1.1rem;">0 ou 1</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">92.9% sorteios</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 10px; text-align: center;">
+                    <div style="color: #9b59b6; font-weight: bold; font-size: 0.75rem;">🗺️ R14 - Freq. Quadrante</div>
+                    <div style="font-size: 1.1rem;">Q3 (31-45)</div>
+                    <div style="font-size: 0.65rem; opacity: 0.7;">Score 100 (maior freq.)</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # ==========================================================================
+    # TAB 3: JOGOS INTELIGENTES
+    # ==========================================================================
+    elif st.session_state.tab_selecionada == "🎲 JOGOS":
+        st.markdown("### 🎲 Gerador de Jogos Inteligentes")
+        st.markdown("*Gera jogos otimizados com base nas 15 regras estatísticas*")
+
+        # ==============================================================
+        # 1. VALOR DA APOSTA
+        # ==============================================================
+        st.markdown("#### 💰 Valor da Aposta")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #1a5f2a 0%, #28a745 100%); padding: 15px 20px; border-radius: 10px; margin-bottom: 15px;">
+            <span style="color: white; font-size: 0.9rem;">Informe quanto deseja investir (mínimo R$ 1.000,00)</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        valor_aposta = st.number_input(
+            "Valor total da aposta (R$)",
+            min_value=1000.0,
+            max_value=100000.0,
+            value=1000.0,
+            step=100.0,
+            format="%.2f",
+            help="Mínimo de R$ 1.000,00 para garantir diversificação adequada"
+        )
+
+        # Mostrar quantos jogos de 6 dezenas cabem no orçamento
+        custo_jogo_6 = TABELA_CUSTOS_OFICIAL[6]
+        jogos_possiveis = int(valor_aposta / custo_jogo_6)
+        st.info(f"💡 Com R$ {valor_aposta:,.2f} você pode fazer até **{jogos_possiveis} jogos** de 6 dezenas (R$ {custo_jogo_6:.2f} cada)")
+
+        st.markdown("---")
+
+        # ==============================================================
+        # 2. FILTROS BASEADOS NAS REGRAS DE CONJUNTO (ordem: R4-R14)
+        # ==============================================================
+        st.markdown("#### 🎯 Filtros de Conjunto (R4, R5, R6, R7, R8, R9, R12, R13, R14)")
+        st.markdown("*Valores pré-configurados com base nos padrões históricos mais frequentes*")
+
+        # Linha 1: R4 Quadrantes, R5 Paridade, R6 Faixas BMA
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("##### 🔲 R4 - Quadrantes")
+            st.caption("Q1(1-15), Q2(16-30), Q3(31-45), Q4(46-60)")
+            opcoes_quadrantes = ["1-1-2-2", "2-1-2-1", "1-2-2-1", "1-2-1-2", "2-1-1-2", "2-2-1-1", "1-1-1-3", "0-2-2-2", "Qualquer"]
+            quadrantes_selecionados = st.multiselect(
+                "Padrões aceitos",
+                opcoes_quadrantes,
+                default=["1-1-2-2", "2-1-2-1", "1-2-2-1", "1-2-1-2", "2-1-1-2", "2-2-1-1"],  # Top 6 mais frequentes (~60%)
+                key="filtro_quadrantes"
+            )
+
+        with col2:
+            st.markdown("##### ⚖️ R5 - Paridade")
+            st.caption("Equilíbrio pares/ímpares")
+            opcoes_paridade = ["3P/3I", "4P/2I", "2P/4I", "5P/1I", "1P/5I", "Qualquer"]
+            paridade_selecionada = st.multiselect(
+                "Padrões aceitos",
+                opcoes_paridade,
+                default=["3P/3I", "4P/2I", "2P/4I"],  # Top 3 mais frequentes (~85%)
+                key="filtro_paridade"
+            )
+
+        with col3:
+            st.markdown("##### 📶 R6 - Faixas B/M/A")
+            st.caption("Baixo(1-20)/Médio(21-40)/Alto(41-60)")
+            opcoes_bma = ["2-2-2", "2-3-1", "3-2-1", "1-3-2", "2-1-3", "1-2-3", "3-1-2", "1-1-4", "Qualquer"]
+            bma_selecionado = st.multiselect(
+                "Padrões aceitos",
+                opcoes_bma,
+                default=["2-2-2", "2-3-1", "3-2-1", "1-3-2", "2-1-3", "1-2-3"],  # Top 6 mais frequentes (~60%)
+                key="filtro_bma"
+            )
+
+        # Linha 2: R7 Linhas, R8 Terminações, R9 Soma
+        col4, col5, col6 = st.columns(3)
+
+        with col4:
+            st.markdown("##### ➡️ R7 - Linhas")
+            st.caption("Distribuição nas 6 linhas do volante")
+            min_linhas = st.slider("Mínimo de linhas", 3, 6, 4, key="min_linhas")  # 4+ = ~95%
+
+        with col5:
+            st.markdown("##### ⬇️ R8 - Terminações")
+            st.caption("Terminações diferentes (0-9)")
+            min_terminacoes = st.slider("Mínimo de terminações", 3, 10, 4, key="min_terminacoes")  # 4+ = ~90%
+
+        with col6:
+            st.markdown("##### ➕ R9 - Soma")
+            st.caption("Soma dos 6 números (ideal: 150-210)")
+            soma_min = st.slider("Soma mínima", 100, 200, 140, key="soma_min")  # 140-220 abrange ~80%
+            soma_max = st.slider("Soma máxima", 180, 270, 220, key="soma_max")
+
+        # Linha 3: R12 H-N-F, R13 Consecutivos, R14 Freq. Quadrante
+        col7, col8, col9 = st.columns(3)
+
+        with col7:
+            st.markdown("##### 🔥 R12 - H-N-F")
+            st.caption("Ideal: 2-3H, 2-3N, 0-2F")
+            col_h1, col_h2, col_h3 = st.columns(3)
+            with col_h1:
+                min_hot = st.number_input("Mín H", 0, 6, 1, key="min_hot")
+                max_hot = st.number_input("Máx H", 0, 6, 4, key="max_hot")
+            with col_h2:
+                min_neutral = st.number_input("Mín N", 0, 6, 1, key="min_neutral")
+                max_neutral = st.number_input("Máx N", 0, 6, 4, key="max_neutral")
+            with col_h3:
+                min_cold = st.number_input("Mín F", 0, 6, 0, key="min_cold")
+                max_cold = st.number_input("Máx F", 0, 6, 3, key="max_cold")
+
+        with col8:
+            st.markdown("##### 🔢 R13 - Consecutivos")
+            st.caption("Números consecutivos (ideal: 0-2)")
+            max_consecutivos = st.slider("Máximo de consecutivos", 0, 4, 2, key="max_consecutivos")
+
+        with col9:
+            st.markdown("##### 🗺️ R14 - Freq. Quadrante")
+            st.caption("Priorizar quadrantes por frequência")
+            opcoes_freq_quad = ["Q3 (31-45)", "Q1 (1-15)", "Q4 (46-60)", "Q2 (16-30)", "Qualquer"]
+            freq_quad_selecionado = st.multiselect(
+                "Quadrantes prioritários",
+                opcoes_freq_quad,
+                default=["Qualquer"],  # Aceitar qualquer - mais flexível
+                key="filtro_freq_quad"
+            )
+
+        # Mostrar resumo dos filtros
+        st.markdown("---")
+        st.markdown("##### 📋 Resumo dos Filtros Aplicados")
+        filtros_html = f"""
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">🔲 R4 - Quadrantes</div>
+                <div style="font-weight: bold; color: #667eea;">{', '.join(quadrantes_selecionados) if quadrantes_selecionados else 'Qualquer'}</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">⚖️ R5 - Paridade</div>
+                <div style="font-weight: bold; color: #4169E1;">{', '.join(paridade_selecionada) if paridade_selecionada else 'Qualquer'}</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">📶 R6 - Faixas BMA</div>
+                <div style="font-weight: bold; color: #FF8C00;">{', '.join(bma_selecionado) if bma_selecionado else 'Qualquer'}</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">➡️ R7 - Linhas</div>
+                <div style="font-weight: bold; color: #17a2b8;">{min_linhas}+ linhas</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">⬇️ R8 - Terminações</div>
+                <div style="font-weight: bold; color: #e83e8c;">{min_terminacoes}+ diferentes</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">➕ R9 - Soma</div>
+                <div style="font-weight: bold; color: #ffc107;">{soma_min} - {soma_max}</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">🔥 R12 - H-N-F</div>
+                <div style="font-weight: bold; color: #ff6b6b;">{min_hot}-{max_hot}H, {min_neutral}-{max_neutral}N, {min_cold}-{max_cold}F</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">🔢 R13 - Consecutivos</div>
+                <div style="font-weight: bold; color: #28a745;">0 a {max_consecutivos}</div>
+            </div>
+            <div style="text-align: center; padding: 8px; background: white; border-radius: 8px;">
+                <div style="font-size: 0.7rem; color: #666;">🗺️ R14 - Freq. Quad.</div>
+                <div style="font-weight: bold; color: #9b59b6;">{', '.join([q.split(' ')[0] for q in freq_quad_selecionado]) if freq_quad_selecionado else 'Qualquer'}</div>
+            </div>
+        </div>
+        """
+        st.markdown(filtros_html, unsafe_allow_html=True)
+
+        # ==============================================================
+        # 2.5 FILTROS IDEAIS RECOMENDADOS
+        # ==============================================================
+        st.markdown("---")
+        with st.expander("💡 **Filtros Ideais para Geração de Jogos** (Valores pré-populados)", expanded=True):
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                <p style="margin: 0; color: #2e7d32; font-size: 0.9rem;">
+                    <strong>📊 Baseado em análise histórica de 2.800+ concursos da Mega-Sena.</strong><br>
+                    Estes valores representam os padrões mais frequentes nos sorteios reais.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col_ideal1, col_ideal2 = st.columns(2)
+
+            with col_ideal1:
+                st.markdown("""
+                **🔲 R4 - Quadrantes (Top 6 padrões - ~60% dos sorteios)**
+                - `1-1-2-2` | `2-1-2-1` | `1-2-2-1`
+                - `1-2-1-2` | `2-1-1-2` | `2-2-1-1`
+
+                **⚖️ R5 - Paridade (Top 3 padrões - ~85% dos sorteios)**
+                - `3P/3I` (3 pares, 3 ímpares) - **mais frequente**
+                - `4P/2I` | `2P/4I`
+
+                **📶 R6 - Faixas B/M/A (Top 6 padrões - ~60%)**
+                - `2-2-2` (equilibrado) - **mais frequente**
+                - `2-3-1` | `3-2-1` | `1-3-2` | `2-1-3` | `1-2-3`
+
+                **➡️ R7 - Linhas**
+                - Mínimo: **4 linhas** (~95% dos sorteios)
+
+                **⬇️ R8 - Terminações**
+                - Mínimo: **4 diferentes** (~90% dos sorteios)
+                """)
+
+            with col_ideal2:
+                st.markdown("""
+                **➕ R9 - Soma dos 6 números**
+                - Faixa ideal: **150 a 200** (~60% dos sorteios)
+                - Média histórica: **175**
+
+                **🔥 R12 - H-N-F (Hot-Neutral-Frio)**
+                - Hot (≥6 aparições em 48 conc.): **1 a 4**
+                - Neutral (4-5 aparições): **1 a 4**
+                - Frio (<4 aparições): **0 a 3**
+                - Padrão ideal: **2-3H, 2-3N, 0-2F**
+
+                **🔢 R13 - Consecutivos**
+                - Máximo: **2** (~90% dos sorteios têm 0-2)
+
+                **🗺️ R14 - Frequência por Quadrante**
+                - Q3 (31-45) historicamente mais frequente
+                - Priorizar quadrantes com maior frequência
+                """)
+
+            st.markdown("""
+            <div style="background: #fff3e0; padding: 10px; border-radius: 8px; margin-top: 10px;">
+                <p style="margin: 0; color: #e65100; font-size: 0.85rem;">
+                    <strong>⚡ Dica:</strong> Para jogos com mais de 6 dezenas, os filtros são automaticamente
+                    escalados proporcionalmente. Ex: Para 16 dezenas, R4 aceita padrões como "3-4-5-4".
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ==============================================================
+        # 2.6 TABELA DE CUSTOS E PROBABILIDADES
+        # ==============================================================
+        with st.expander("📊 Ver Tabela de Custos e Probabilidades", expanded=False):
+            st.info("💡 **Dica:** Quanto mais dezenas você jogar, maior o custo mas também maior a chance de acertar!")
+
+            # Montar DataFrame com custos e probabilidades
+            tabela_data = []
+            for dezenas in range(6, 21):
+                custo = TABELA_CUSTOS_OFICIAL.get(dezenas, 0)
+                prob = PROBABILIDADES.get(dezenas, (0, 0, 0))
+                tabela_data.append({
+                    '🎯 Dezenas': dezenas,
+                    '💰 Custo': f"R$ {custo:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'),
+                    '🏆 Sena (6)': f"1 em {prob[0]:,}".replace(',', '.'),
+                    '⭐ Quina (5)': f"1 em {prob[1]:,}".replace(',', '.'),
+                    '✅ Quadra (4)': f"1 em {prob[2]:,}".replace(',', '.')
+                })
+
+            df_custos = pd.DataFrame(tabela_data)
+
+            # Usar st.dataframe com configuração de colunas
+            st.dataframe(
+                df_custos,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    '🎯 Dezenas': st.column_config.NumberColumn(
+                        '🎯 Dezenas',
+                        help='Quantidade de dezenas na aposta',
+                        format='%d'
+                    ),
+                    '💰 Custo': st.column_config.TextColumn(
+                        '💰 Custo',
+                        help='Valor da aposta em Reais'
+                    ),
+                    '🏆 Sena (6)': st.column_config.TextColumn(
+                        '🏆 Sena (6)',
+                        help='Probabilidade de acertar 6 números'
+                    ),
+                    '⭐ Quina (5)': st.column_config.TextColumn(
+                        '⭐ Quina (5)',
+                        help='Probabilidade de acertar 5 números'
+                    ),
+                    '✅ Quadra (4)': st.column_config.TextColumn(
+                        '✅ Quadra (4)',
+                        help='Probabilidade de acertar 4 números'
+                    )
+                }
+            )
+
+            st.warning("⚠️ **Nota:** Probabilidades são '1 em X' - quanto menor o número, maior a chance! Com 20 dezenas, a chance de Sena é 1 em 1.292 (vs 1 em 50 milhões com 6 dezenas).")
+
+        # ==============================================================
+        # 3. BOTÃO GERAR JOGOS
+        # ==============================================================
+        st.markdown("#### 🎰 Gerar Jogos")
+
+        # Montar config com os filtros (ordem: R4, R5, R6, R7, R8, R9, R12, R13, R14)
+        config = DEFAULT_CONFIG.copy()
+        config['valor_aposta'] = valor_aposta
+        config['n_jogos'] = jogos_possiveis
+
+        # R4 - Quadrantes - filtrar "Qualquer" e se vazio, usar None (aceita tudo)
+        quadrantes_filtrados = [q for q in quadrantes_selecionados if q != "Qualquer"]
+        config['quadrantes_aceitos'] = quadrantes_filtrados if quadrantes_filtrados else None
+
+        # R5 - Paridade - extrair min/max pares, filtrar "Qualquer"
+        paridade_filtrada = [p for p in paridade_selecionada if p != "Qualquer"]
+        if paridade_filtrada:
+            pares_vals = [int(p.split('P')[0]) for p in paridade_filtrada]
+            config['min_pares'] = min(pares_vals)
+            config['max_pares'] = max(pares_vals)
+        else:
+            config['min_pares'] = 0
+            config['max_pares'] = 6
+
+        # R6 - Faixas BMA - filtrar "Qualquer"
+        bma_filtrado = [b for b in bma_selecionado if b != "Qualquer"]
+        config['bma_aceito'] = bma_filtrado if bma_filtrado else None
+
+        # R7 - Linhas
+        config['min_linhas'] = min_linhas
+        # R8 - Terminações
+        config['min_terminacoes'] = min_terminacoes
+        # R9 - Soma
+        config['soma_min'] = soma_min
+        config['soma_max'] = soma_max
+        config['validar_soma'] = True
+        # R12 - H-N-F
+        config['min_hot'] = min_hot
+        config['max_hot'] = max_hot
+        config['min_neutral'] = min_neutral
+        config['max_neutral'] = max_neutral
+        config['min_cold'] = min_cold
+        config['max_cold'] = max_cold
+        # R13 - Consecutivos
+        config['max_consecutivos'] = max_consecutivos
+
+        # R14 - Freq. Quadrante - filtrar "Qualquer"
+        freq_quad_filtrado = [q for q in freq_quad_selecionado if q != "Qualquer"]
+        config['freq_quad_prioritarios'] = freq_quad_filtrado if freq_quad_filtrado else None
+
+        # Pool size - maior para mais diversidade
+        config['pool_size'] = 40
+
+        # Inicializar session_state para jogos
+        if 'jogos_gerados' not in st.session_state:
+            st.session_state.jogos_gerados = None
+
+        # Adicionar budget ao config (valor_aposta é o budget do usuário)
+        config['budget'] = valor_aposta
+
+        gerar_clicked = st.button("🎰 Gerar Jogos Otimizados", type="primary", use_container_width=True, key="btn_gerar")
+
+        if gerar_clicked:
+            with st.spinner("🔄 Gerando jogos otimizados... Aguarde!"):
+                try:
+                    jogos = gerar_jogos(
+                        config=config,
+                        verbose=False
+                    )
+                    if jogos and len(jogos) > 0:
+                        st.session_state.jogos_gerados = jogos
+                        st.session_state.config_usado = config
+                        st.session_state.budget_usado = valor_aposta
+                        st.success(f"✅ {len(jogos)} jogos gerados com sucesso!")
+                    else:
+                        st.warning("⚠️ Nenhum jogo foi gerado. Tente selecionar 'Qualquer' nos filtros de Quadrantes, BMA e Freq. Quadrante.")
+                except Exception as e:
+                    st.error(f"❌ Erro ao gerar jogos: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+        # Exibir jogos gerados se existirem
+        if st.session_state.jogos_gerados:
+            jogos = st.session_state.jogos_gerados
+
+            # Calcular custos reais
+            custo_total = sum(j.get('custo', 0) for j in jogos)
+            budget_usado = st.session_state.get('budget_usado', valor_aposta)
+            sobra = budget_usado - custo_total
+
+            # Distribuição por dezenas
+            dist_dezenas = {}
+            for j in jogos:
+                nd = j.get('n_dezenas', 6)
+                dist_dezenas[nd] = dist_dezenas.get(nd, 0) + 1
+
+            st.success(f"✅ {len(jogos)} jogos gerados com sucesso!")
+
+            # Converter para DataFrame
+            df_jogos = jogos_para_dataframe(jogos)
+
+            # Card de resumo
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #1a5f2a 0%, #28a745 100%); padding: 20px; border-radius: 15px; margin: 15px 0;">
+                <h3 style="color: white; margin: 0 0 15px 0; text-align: center;">🎯 Resumo da Geração</h3>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center;">
+                    <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
+                        <div style="color: #ccc; font-size: 0.8rem;">Jogos Gerados</div>
+                        <div style="color: white; font-size: 1.5rem; font-weight: bold;">{len(jogos)}</div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
+                        <div style="color: #ccc; font-size: 0.8rem;">Custo Total</div>
+                        <div style="color: white; font-size: 1.5rem; font-weight: bold;">R$ {custo_total:,.2f}</div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
+                        <div style="color: #ccc; font-size: 0.8rem;">Sobra</div>
+                        <div style="color: white; font-size: 1.5rem; font-weight: bold;">R$ {sobra:,.2f}</div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
+                        <div style="color: #ccc; font-size: 0.8rem;">Score Médio</div>
+                        <div style="color: white; font-size: 1.5rem; font-weight: bold;">{df_jogos['score_combinado'].mean():.1f}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Distribuição de dezenas
+            dist_html = " | ".join([f"<b>{nd}dez:</b> {qtd}x" for nd, qtd in sorted(dist_dezenas.items(), reverse=True)])
+            st.markdown(f"""
+            <div style="background: #f8f9fa; padding: 12px 20px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #28a745;">
+                <span style="color: #666;">📊 <b>Distribuição:</b></span> {dist_html}
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Tabela de jogos
+            st.markdown("##### 📋 Jogos Gerados")
+
+            # Contar jogos com fallback
+            jogos_fallback = sum(1 for j in jogos if j.get('usou_fallback', False))
+            if jogos_fallback > 0:
+                st.warning(f"⚠️ **{jogos_fallback} jogo(s)** foram gerados com fallback (padrões específicos não atendidos, usou validação por range)")
+
+            # Exibir cada jogo como card
+            for i, jogo in enumerate(jogos, 1):
+                numeros = jogo['numeros']
+                n_dezenas = jogo.get('n_dezenas', len(numeros))
+                custo_jogo = jogo.get('custo', TABELA_CUSTOS_OFICIAL.get(n_dezenas, 0))
+                usou_fallback = jogo.get('usou_fallback', False)
+
+                # Título com indicador de fallback
+                titulo_fallback = " ⚠️" if usou_fallback else ""
+                with st.expander(f"🎰 Jogo #{i}: {'-'.join(f'{n:02d}' for n in numeros)} | {n_dezenas} dez | R$ {custo_jogo:,.2f} | Score: {jogo['score_combinado']:.1f}{titulo_fallback}", expanded=(i <= 3)):
+                    col1, col2, col3 = st.columns([2, 1.2, 1.3])
+
+                    with col1:
+                        # Aviso de fallback
+                        if usou_fallback:
+                            st.caption("⚠️ Gerado com fallback (padrões relaxados)")
+
+                        # Volante visual mini
+                        html_nums = ""
+                        for n in range(1, 61):
+                            bg = "#28a745" if n in numeros else "#f0f0f0"
+                            color = "white" if n in numeros else "#333"
+                            html_nums += f'<span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;margin:2px;border-radius:50%;background:{bg};color:{color};font-size:0.75rem;font-weight:bold;">{n:02d}</span>'
+                            if n % 10 == 0:
+                                html_nums += "<br>"
+
+                        st.markdown(f'<div style="font-family:monospace;">{html_nums}</div>', unsafe_allow_html=True)
+
+                    with col2:
+                        st.markdown(f"""
+                        **📋 Análise:**
+                        - 🎯 Dezenas: `{n_dezenas}`
+                        - 💰 Custo: `R$ {custo_jogo:,.2f}`
+                        - 🔲 Quadrantes: `{jogo['padrao_quad']}`
+                        - ⚖️ Paridade: `{jogo['padrao_par']}`
+                        - 📶 Faixas: `{jogo['padrao_bma']}`
+                        - 📏 Linhas: `{jogo.get('linhas_usadas', '-')}`
+                        - 🔢 Terminações: `{jogo.get('terminacoes_usadas', '-')}`
+                        - ➕ Soma: `{jogo['soma']}`
+                        - 🔥 H-N-F: `{jogo.get('hot_count', 0)}H-{jogo.get('neutral_count', 0)}N-{jogo.get('cold_count', 0)}F`
+                        - 🔗 Consecutivos: `{jogo['consecutivos']}`
+                        """)
+
+                    with col3:
+                        # Painel de Notas por Regra
+                        st.markdown("**📊 Notas:**")
+
+                        # Função para emoji/letra baseado na nota
+                        def get_nota_label(nota):
+                            if nota >= 90:
+                                return "A+", "🟢"
+                            elif nota >= 80:
+                                return "A", "🟢"
+                            elif nota >= 70:
+                                return "B", "🟡"
+                            elif nota >= 60:
+                                return "C", "🟡"
+                            elif nota >= 50:
+                                return "D", "🟠"
+                            else:
+                                return "E", "🔴"
+
+                        # Notas das regras de conjunto (usando aderências)
+                        notas = {
+                            'Quadrantes': jogo.get('aderencia_quad', 50),
+                            'Paridade': jogo.get('aderencia_par', 50),
+                            'Faixas': jogo.get('aderencia_bma', 50),
+                            'Soma': jogo.get('aderencia_soma', 50),
+                            'Sequências': jogo.get('aderencia_seq', 50),
+                        }
+
+                        # Calcular notas adicionais
+                        linhas = jogo.get('linhas_usadas', 4)
+                        linhas_ideal = min(6, max(4, n_dezenas * 0.6))
+                        notas['Linhas'] = min(100, (linhas / linhas_ideal) * 100)
+
+                        terminacoes = jogo.get('terminacoes_usadas', 5)
+                        terminacoes_ideal = min(10, max(5, n_dezenas * 0.7))
+                        notas['Terminações'] = min(100, (terminacoes / terminacoes_ideal) * 100)
+
+                        hot = jogo.get('hot_count', 0)
+                        neutral = jogo.get('neutral_count', 0)
+                        cold = jogo.get('cold_count', 0)
+                        hot_ideal = n_dezenas * 0.4
+                        neutral_ideal = n_dezenas * 0.35
+                        cold_ideal = n_dezenas * 0.25
+                        desvio_hnf = (abs(hot - hot_ideal) + abs(neutral - neutral_ideal) + abs(cold - cold_ideal)) / 3
+                        notas['H-N-F'] = max(0, 100 - desvio_hnf * 30)
+
+                        # Exibir notas usando st.progress
+                        for regra, nota in notas.items():
+                            letra, emoji = get_nota_label(nota)
+                            col_label, col_bar, col_nota = st.columns([1.2, 1.5, 0.5])
+                            with col_label:
+                                st.caption(regra)
+                            with col_bar:
+                                st.progress(min(100, int(nota)) / 100)
+                            with col_nota:
+                                st.caption(f"{emoji}{letra}")
+
+                        # Nota final (média ponderada)
+                        nota_final = (
+                            notas.get('Quadrantes', 0) * 0.15 +
+                            notas.get('Paridade', 0) * 0.20 +
+                            notas.get('Faixas', 0) * 0.15 +
+                            notas.get('Linhas', 0) * 0.10 +
+                            notas.get('Terminações', 0) * 0.10 +
+                            notas.get('Soma', 0) * 0.15 +
+                            notas.get('H-N-F', 0) * 0.10 +
+                            notas.get('Sequências', 0) * 0.05
+                        )
+                        letra_final, emoji_final = get_nota_label(nota_final)
+
+                        st.markdown("---")
+                        col_f1, col_f2, col_f3 = st.columns([1.2, 1.5, 0.5])
+                        with col_f1:
+                            st.markdown("**FINAL**")
+                        with col_f2:
+                            st.progress(min(100, int(nota_final)) / 100)
+                        with col_f3:
+                            st.markdown(f"**{emoji_final}{letra_final}**")
+
+            # Botão para exportar
+            st.markdown("---")
+            csv = df_jogos.to_csv(index=False)
+            st.download_button(
+                label="📥 Baixar Jogos (CSV)",
+                data=csv,
+                file_name="megasena_jogos.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+            # Botão para limpar
+            if st.button("🗑️ Limpar Jogos", use_container_width=True):
+                st.session_state.jogos_gerados = None
+                st.rerun()
+
+
 if __name__ == "__main__":
     main()
