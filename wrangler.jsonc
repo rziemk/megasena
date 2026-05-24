@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "megasena",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-23",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "megaenadica.com/*",
+      "zone_name": "megaenadica.com"
+    },
+    {
+      "pattern": "www.megaenadica.com/*",
+      "zone_name": "megaenadica.com"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "StreamlitContainer",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "STREAMLIT",
+        "class_name": "StreamlitContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["StreamlitContainer"]
+    }
+  ]
+}

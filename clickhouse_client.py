@@ -27,19 +27,39 @@ def load_dev_vars():
     return config
 
 
+def load_clickhouse_config():
+    """Carrega configuracao local e permite override por variaveis de ambiente."""
+    config = load_dev_vars()
+    env_keys = [
+        'CLICKHOUSE_HOST',
+        'CLICKHOUSE_PORT',
+        'CLICKHOUSE_USER',
+        'CLICKHOUSE_PASSWORD',
+        'CLICKHOUSE_DATABASE',
+        'CLICKHOUSE_SECURE',
+    ]
+
+    for key in env_keys:
+        value = os.environ.get(key)
+        if value is not None:
+            config[key] = value
+
+    return config
+
+
 class ClickHouseClient:
     """Cliente para consultas ao ClickHouse (local ou cloud)."""
 
     def __init__(self, host=None, database='loterias'):
-        # Carregar configurações do dev.vars se existir
-        config = load_dev_vars()
+        # Carregar configurações do ambiente, com dev.vars como fallback local
+        config = load_clickhouse_config()
 
         # Configurações cloud ou local
         self.host = host or config.get('CLICKHOUSE_HOST', 'localhost')
         self.port = config.get('CLICKHOUSE_PORT', '9000')
         self.user = config.get('CLICKHOUSE_USER', 'default')
         self.password = config.get('CLICKHOUSE_PASSWORD', '')
-        self.database = database
+        self.database = config.get('CLICKHOUSE_DATABASE', database)
         self.secure = config.get('CLICKHOUSE_SECURE', 'false').lower() == 'true'
 
         # Determinar se é cloud ou local

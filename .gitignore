@@ -26,6 +26,13 @@ ENV/
 env/
 .venv/
 
+# Node / Cloudflare local artifacts
+node_modules/
+.wrangler/
+dev.vars
+.dev.vars
+.env
+
 # IDE
 .idea/
 .vscode/

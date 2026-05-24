@@ -30,7 +30,20 @@ st.set_page_config(
 st.markdown("""
 <style>
     /* Reset e Base */
-    .block-container { padding-top: 1rem; }
+    .block-container {
+        padding-top: 2.75rem;
+        padding-bottom: 2rem;
+    }
+
+    [data-testid="stHeader"],
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"],
+    #MainMenu,
+    footer {
+        display: none !important;
+        visibility: hidden !important;
+    }
 
     /* Título Principal */
     .main-header {
@@ -39,7 +52,7 @@ st.markdown("""
         padding: 1.5rem;
         border-radius: 15px;
         text-align: center;
-        margin-bottom: 1.5rem;
+        margin: 0.75rem 0 1.5rem 0;
         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
     .main-header h1 { margin: 0; font-size: 2.5rem; }
@@ -920,6 +933,8 @@ def main():
     if 'ja_verificou_update' not in st.session_state:
         st.session_state.ja_verificou_update = False
 
+    update_notice = None
+
     # Placeholder para loading - só mostra se dados ainda não carregados
     loading_placeholder = st.empty()
 
@@ -946,7 +961,7 @@ def main():
         resumo = st.session_state.get("resumo_update")
         if resumo:
             if resumo.get("erro") and resumo.get("importados", 0) == 0:
-                st.warning(f"⚠️ Não foi possível atualizar: {resumo['erro']}")
+                update_notice = ("warning", f"⚠️ Não foi possível atualizar: {resumo['erro']}")
             elif resumo.get("importados", 0) > 0:
                 ultimo = resumo.get("ultimo_concurso")
                 data_ult = resumo.get("ultima_data")
@@ -958,11 +973,11 @@ def main():
                 )
                 if falhas:
                     msg += f" {len(falhas)} concurso(s) falharam: {falhas}."
-                st.success(msg)
+                update_notice = ("success", msg)
             else:
                 ultimo = resumo.get("ultimo_concurso")
                 if ultimo:
-                    st.info(f"✓ Dados já estavam atualizados. Último concurso no DB: **{ultimo}**.")
+                    update_notice = ("info", f"✓ Dados já estavam atualizados. Último concurso no DB: **{ultimo}**.")
 
     # Carregar dados (usa cache do @st.cache_data ou session_state)
     try:
@@ -989,6 +1004,15 @@ def main():
         <p>Sistema de Análise Estatística com 15 Regras Inteligentes</p>
     </div>
     ''', unsafe_allow_html=True)
+
+    if update_notice:
+        notice_type, notice_message = update_notice
+        if notice_type == "warning":
+            st.warning(notice_message)
+        elif notice_type == "success":
+            st.success(notice_message)
+        else:
+            st.info(notice_message)
 
     # Stats rápidos
     col1, col2, col3, col4 = st.columns(4)
